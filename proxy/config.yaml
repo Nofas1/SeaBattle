@@ -1,0 +1,11 @@
+proxy: 
+  address: "localhost"
+  port: 8085
+bots:
+  simple_bot:
+    url: "http://localhost:8081"
+  smart_bot:
+    url: "http://localhost:8082"
+  ai_bot:
+    url: "http://localhost:8083"
+

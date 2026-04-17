@@ -1,0 +1,45 @@
+services:
+  proxy:
+    ports:
+      - 8085:8085
+    container_name:
+      proxy
+    build:
+      context: .
+      dockerfile: proxy/Dockerfile
+    depends_on:
+      - simple_bot
+      - smart_bot
+      - ai_bot
+    restart:
+      unless-stopped
+  simple_bot:
+    ports:
+      - 8081:8085
+    container_name:
+      simple_bot
+    build:
+      context: .
+      dockerfile: simple_bot/Dockerfile
+    restart:
+      unless-stopped
+  smart_bot:
+    ports:
+      - 8082:8085
+    container_name:
+      smart_bot
+    build:
+      context: .
+      dockerfile: smart_bot/Dockerfile
+    restart:
+      unless-stopped
+  ai_bot:
+    ports:
+      - 8083:8085
+    container_name:
+      ai_bot
+    build:
+      context: .
+      dockerfile: ai_bot/Dockerfile
+    restart:
+      unless-stopped

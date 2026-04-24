@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sea_battle/my_types"
 	"sea_battle/proxy/config"
 	"time"
 )
@@ -34,6 +35,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			Name   string  `json:"name"`
 			Field  [][]int `json:"field"`
 			Action string  `json:"action"`
+			Result my_types.ShotResult `json:"result,omitempty"`
 		}
 
 		type ProxyResponse struct {
@@ -65,6 +67,19 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 		resp, err := p.client.Do(new_req)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		resp.Body.Close()
+
+		if req.Action == "set_result" {
+			type SetResultRequest struct {
+				Result my_types.ShotResult `json:"result"`
+			}
+			body, _ := json.Marshal(SetResultRequest{Result: req.Result})
+			joinURL, _ := url.JoinPath(baseURL, "set_result")
+			new_req, _ := http.NewRequestWithContext(ctx, "POST", joinURL, bytes.NewReader(body))
+			p.client.Do(new_req)
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 

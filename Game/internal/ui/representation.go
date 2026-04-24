@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"fmt"
+	"log/slog"
+	"os"
 	"sea_battle/Game/internal/domain"
-	"sea_battle/my_types"
 	"sea_battle/Game/internal/game"
+	"sea_battle/my_types"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -25,7 +28,7 @@ const (
 	offsetY     = int32(PADDING)
 )
 
-func SelectBot(userField *domain.Field, music rl.Music) game.Bot {
+func SelectBot(userField *domain.Field, music rl.Music, logger *slog.Logger) game.Bot {
 	buttons := []struct {
 		label string
 		rect  rl.Rectangle
@@ -69,18 +72,21 @@ func SelectBot(userField *domain.Field, music rl.Music) game.Bot {
 				rl.EndDrawing()
 				switch btn.label {
 				case "Simple Bot":
-					return game.NewBotProxy(userField, "http://localhost:8081")
+					fmt.Printf("SimpleBot chosen")
+					return game.NewBotProxy(userField, "http://localhost:8085", "simple_bot", logger)
 				case "Smart Bot":
-					return game.NewBotProxy(userField, "http://localhost:8082")
+					fmt.Printf("SmartBot chosen")
+					return game.NewBotProxy(userField, "http://localhost:8085", "smart_bot", logger)
 				case "AI Bot":
-					return game.NewBotProxy(userField, "http://localhost:8083")
+					fmt.Printf("AIBot chosen")
+					return game.NewBotProxy(userField, "http://localhost:8085", "ai_bot", logger)
 				}
 			}
 		}
 
 		rl.EndDrawing()
 	}
-	return game.NewBotProxy(userField, "http://localhost:8081")
+	return game.NewBotProxy(userField, "http://localhost:8085", "simple_bot", logger)
 }
 
 func DrawGrid(offsetX, offsetY int32, matrix [][]int, hideShips bool) {
@@ -185,7 +191,7 @@ func Placer(userField *domain.Field, cancel <-chan struct{}, music rl.Music) {
 	}
 }
 
-func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music) {
+func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, logger *slog.Logger) {
 	user_sunk := 0
 	bot_sunk := 0
 	turn := true
@@ -228,7 +234,13 @@ func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music) {
 			}
 		} else if turn == false {
 			// timeout
-			shotRes := game.BotShot(bot, userField)
+			shotRes, err := game.BotShot(bot, userField)
+			if err != nil {
+				logger.Error("bot error", "error", err)
+				rl.DrawText("Bot unavailable!", 400, 300, 30, rl.Red)
+				continue
+			}
+			
 			if shotRes != my_types.Already {
 				rl.PlaySound(hit_sound)
 				if shotRes == my_types.Sink {
@@ -259,8 +271,9 @@ func Run(userField, botField *domain.Field) {
 	rl.SetMusicVolume(music, 0.1)
 	rl.PlayMusicStream(music)
 
-	bot := SelectBot(userField, music)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	bot := SelectBot(userField, music, logger)
 
 	Placer(userField, cancel, music)
-	Battle(userField, botField, bot, music)
+	Battle(userField, botField, bot, music, logger)
 }

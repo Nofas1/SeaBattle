@@ -6,10 +6,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-
-type Config struct {
+type BotConfig struct {
 	Address string `yaml:"address"`
 	Port    int    `yaml:"port"`
+}
+
+type Config struct {
+	BotCfg BotConfig `yaml:"smart_bot"`
 }
 
 func LoadConfig(path string) (*Config, error) {

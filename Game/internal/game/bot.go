@@ -3,6 +3,8 @@ package game
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sea_battle/Game/internal/domain"
@@ -10,71 +12,103 @@ import (
 )
 
 type Bot interface {
-	Place() (int, int, domain.Pair)
-	Shoot(*domain.Field) domain.Pair
-	SetResult(my_types.ShotResult)
+	Place() (int, int, domain.Pair, error)
+	Shoot(*domain.Field) (domain.Pair, error)
+	SetResult(my_types.ShotResult) error
 }
 
 type BotProxy struct {
 	field   *domain.Field
 	baseURL string
+	botName string
+	logger  *slog.Logger
 	client  *http.Client
 }
 
-func NewBotProxy(field *domain.Field, url string) *BotProxy {
-	return &BotProxy{field: field, baseURL: url, client: &http.Client{}}
+type ProxyRequest struct {
+	Name   string              `json:"name"`
+	Field  [][]int             `json:"field"`
+	Action string              `json:"action"`
+	Result my_types.ShotResult `json:"result,omitempty"`
 }
 
-func (bp *BotProxy) Shoot(field *domain.Field) domain.Pair {
-	body, _ := json.Marshal(field.Matrix)
-    
-    url, _ := url.JoinPath(bp.baseURL, "shoot")
-    req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+func NewBotProxy(field *domain.Field, url string, botName string, logger *slog.Logger) *BotProxy {
+	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger}
+}
+
+func (bp *BotProxy) Shoot(field *domain.Field) (domain.Pair, error) {
+    body, _ := json.Marshal(ProxyRequest{
+        Name:   bp.botName,
+        Field:  field.Matrix,
+        Action: "shoot",
+    })
+    joinURL, _ := url.JoinPath(bp.baseURL, "/")
+    req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
     if err != nil {
-        return domain.Pair{X: my_types.GlobalRand.Intn(10), Y: my_types.GlobalRand.Intn(10)}
+        return domain.Pair{}, fmt.Errorf("shoot: failed to create request: %w", err)
     }
     req.Header.Set("Content-Type", "application/json")
-    
     resp, err := bp.client.Do(req)
     if err != nil {
-        return domain.Pair{X: my_types.GlobalRand.Intn(10), Y: my_types.GlobalRand.Intn(10)}
+        return domain.Pair{}, fmt.Errorf("shoot: bot unavailable: %w", err)
     }
     defer resp.Body.Close()
-    
     var pair domain.Pair
-    json.NewDecoder(resp.Body).Decode(&pair)
-    return pair
+    if err := json.NewDecoder(resp.Body).Decode(&pair); err != nil {
+        return domain.Pair{}, fmt.Errorf("shoot: failed to decode: %w", err)
+    }
+    return pair, nil
 }
 
-func (bp *BotProxy) Place() (int, int, domain.Pair) {
-	url, _ := url.JoinPath(bp.baseURL, "place")
-    req, err := http.NewRequest("POST", url, nil)
+func (bp *BotProxy) Place() (int, int, domain.Pair, error) {
+    body, _ := json.Marshal(ProxyRequest{
+        Name:   bp.botName,
+        Field:  bp.field.Matrix,
+        Action: "place",
+    })
+    joinURL, _ := url.JoinPath(bp.baseURL, "/")
+    req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
     if err != nil {
-        return my_types.GlobalRand.Intn(4), my_types.GlobalRand.Intn(10),
-            domain.Pair{X: my_types.GlobalRand.Intn(10), Y: my_types.GlobalRand.Intn(10)}
+        return 0, 0, domain.Pair{}, fmt.Errorf("place: failed to create request: %w", err)
     }
     req.Header.Set("Content-Type", "application/json")
-
     resp, err := bp.client.Do(req)
     if err != nil {
-        return my_types.GlobalRand.Intn(4), my_types.GlobalRand.Intn(10),
-            domain.Pair{X: my_types.GlobalRand.Intn(10), Y: my_types.GlobalRand.Intn(10)}
+        return 0, 0, domain.Pair{}, fmt.Errorf("place: bot unavailable: %w", err)
     }
     defer resp.Body.Close()
-
     var res struct {
-        X   int          `json:"x"`
-        Y   int          `json:"y"`
+        X   int         `json:"x"`
+        Y   int         `json:"y"`
         Dir domain.Pair `json:"dir"`
     }
-    json.NewDecoder(resp.Body).Decode(&res)
-    return res.X, res.Y, res.Dir
+    if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+        return 0, 0, domain.Pair{}, fmt.Errorf("place: failed to decode: %w", err)
+    }
+    return res.X, res.Y, res.Dir, nil
 }
 
-func (bp *BotProxy) SetResult(result my_types.ShotResult) {
-	body, _ := json.Marshal(result)
-    url, _ := url.JoinPath(bp.baseURL, "set_result")
-    req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+func (bp *BotProxy) SetResult(result my_types.ShotResult) error {
+    type SetResultRequest struct {
+        Name   string             `json:"name"`
+        Result my_types.ShotResult `json:"result"`
+        Action string             `json:"action"`
+    }
+    body, _ := json.Marshal(SetResultRequest{
+        Name:   bp.botName,
+        Result: result,
+        Action: "set_result",
+    })
+    joinURL, _ := url.JoinPath(bp.baseURL, "/")
+    req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
+    if err != nil {
+        return fmt.Errorf("set_result: failed to create request: %w", err)
+    }
     req.Header.Set("Content-Type", "application/json")
-    bp.client.Do(req)
+    resp, err := bp.client.Do(req)
+    if err != nil {
+        return fmt.Errorf("set_result: bot unavailable: %w", err)
+    }
+    defer resp.Body.Close()
+    return nil
 }

@@ -100,6 +100,7 @@ func main() {
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())
 
-	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.Address, cfg.Port), nil)
+	logger.Info("", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
+	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.BotCfg.Address, cfg.BotCfg.Port), nil)
 	fmt.Println(err)
 }

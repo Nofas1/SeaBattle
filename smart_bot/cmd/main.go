@@ -30,8 +30,10 @@ func NewHandler(bot Bot, logger *slog.Logger) *Handler {
 func (h *Handler) ShootHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		var field my_types.Field
-		err := json.NewDecoder(r.Body).Decode(&field)
+		var req struct {
+            Field [][]int `json:"field"`
+        }
+        err := json.NewDecoder(r.Body).Decode(&req)
 		if err != nil {
 			h.logger.Error(
 				"failed to decode field",
@@ -42,7 +44,7 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 			return
 		}
 
-		shot := h.bot.Shoot(&field)
+		shot := h.bot.Shoot(&my_types.Field{Matrix: req.Field})
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(shot)
 		w.WriteHeader(http.StatusOK)
@@ -50,26 +52,32 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 }
 
 func (h *Handler) SetResultHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		var res my_types.ShotResult
-		err := json.NewDecoder(r.Body).Decode(&res)
-		if err != nil {
-			h.logger.Error(
+    return func(w http.ResponseWriter, r *http.Request) {
+        defer r.Body.Close()
+        var req struct {
+            Result my_types.ShotResult `json:"result"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            h.logger.Error(
 				"failed to decode shot result",
 				"source", "smart_bot",
 				"error", err,
 			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		h.bot.SetResult(res)
-		w.WriteHeader(http.StatusOK)
-	}
+            http.Error(w, err.Error(), http.StatusInternalServerError)
+            return
+        }
+        h.bot.SetResult(req.Result)
+        w.WriteHeader(http.StatusOK)
+    }
 }
 
 func (h *Handler) PlaceHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req struct {
+            Field [][]int `json:"field"`
+        }
+        json.NewDecoder(r.Body).Decode(&req)
 		type PlaceResponse struct {
 			X   int           `json:"x"`
 			Y   int           `json:"y"`
@@ -93,13 +101,14 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	var bot Bot = internal.NewSmartBot()
+	var bot Bot = internal.NewSmartBot(logger)
 	h := NewHandler(bot, logger)
 
 	http.HandleFunc("/shoot", h.ShootHandler())
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())
 
-	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.Address, cfg.Port), nil)
+	logger.Info("", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
+	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.BotCfg.Address, cfg.BotCfg.Port), nil)
 	fmt.Println(err)
 }

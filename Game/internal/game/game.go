@@ -1,6 +1,7 @@
 package game
 
 import (
+	"fmt"
 	"sea_battle/Game/internal/domain"
 	"sea_battle/my_types"
 )
@@ -30,13 +31,14 @@ func UserShot(field *domain.Field, row, col int) my_types.ShotResult {
 	return Shoot(field, row, col)
 }
 
-func BotShot(bot Bot, field *domain.Field) my_types.ShotResult {
-	shot := bot.Shoot(field)
-	if shot.X == 11 && shot.Y == 11 {
-		shot.X = 5
-		shot.Y = 5
-	}
-	shotRes := Shoot(field, shot.X, shot.Y)
-	bot.SetResult(shotRes)
-	return shotRes
+func BotShot(bot Bot, field *domain.Field) (my_types.ShotResult, error) {
+	shot, err := bot.Shoot(field)
+    if err != nil {
+        return my_types.Miss, fmt.Errorf("bot unavailable: %w\n", err)
+    }
+    shotRes := Shoot(field, shot.X, shot.Y)
+    if err := bot.SetResult(shotRes); err != nil {
+        return shotRes, fmt.Errorf("bot unavailable: %w\n", err)
+    }
+    return shotRes, nil
 }

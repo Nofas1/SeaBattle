@@ -13,7 +13,7 @@ import (
 
 type Bot interface {
 	Place() (int, int, domain.Pair, error)
-	Shoot(*domain.Field) (domain.Pair, error)
+	Shoot() (domain.Pair, error)
 	SetResult(my_types.ShotResult) error
 }
 
@@ -36,10 +36,9 @@ func NewBotProxy(field *domain.Field, url string, botName string, logger *slog.L
 	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger}
 }
 
-func (bp *BotProxy) Shoot(field *domain.Field) (domain.Pair, error) {
+func (bp *BotProxy) Shoot() (domain.Pair, error) {
 	body, _ := json.Marshal(ProxyRequest{
 		Name:   bp.botName,
-		Field:  field.Matrix,
 		Action: "shoot",
 	})
 	joinURL, _ := url.JoinPath(bp.baseURL, "/")

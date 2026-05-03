@@ -43,7 +43,7 @@ func (sb *SmartBot) Place() (int, int, my_types.Pair) {
     return x, y, my_types.Pair{X: dir[0], Y: dir[1]}
 }
 
-func (sb *SmartBot) Shoot(field *my_types.Field) my_types.Pair {
+func (sb *SmartBot) Shoot() my_types.Pair {
     sb.logger.Debug(
         "shoot called",
         "state", sb.state,
@@ -53,22 +53,6 @@ func (sb *SmartBot) Shoot(field *my_types.Field) my_types.Pair {
         for len(sb.memory) > 0 {
             next := sb.memory[0]
             sb.memory = sb.memory[1:]
-            if next.X < 0 || next.X >= my_types.Size || next.Y < 0 || next.Y >= my_types.Size {
-                sb.logger.Debug(
-                    "skip out of bounds",
-                    "target", next,
-                )
-                continue
-            }
-            if field.Matrix[next.X][next.Y] == my_types.FILL || 
-                field.Matrix[next.X][next.Y] == my_types.SHOOTED || 
-                field.Matrix[next.X][next.Y] == my_types.MISSED {
-                    sb.logger.Debug(
-                        "skip already shot",
-                        "target", next,
-                    )
-                    continue
-            }
             sb.logger.Info(
                 "sink shot",
                 "target", next,
@@ -78,24 +62,17 @@ func (sb *SmartBot) Shoot(field *my_types.Field) my_types.Pair {
             return next
         }
         sb.reset()
-    } else {
-        for {
-            target := my_types.Pair{
-                X: my_types.GlobalRand.Intn(my_types.Size),
-                Y: my_types.GlobalRand.Intn(my_types.Size),
-            }
-            if field.Matrix[target.X][target.Y] == my_types.EMPTY || field.Matrix[target.X][target.Y] == my_types.SHIP {
-                sb.logger.Info(
-                    "random shot",
-                    "target", target,
-                )
-                sb.lastShot = target
-                return target
-            }
-        }
     }
-
-    return my_types.Pair{}
+    target := my_types.Pair{
+        X: my_types.GlobalRand.Intn(my_types.Size),
+        Y: my_types.GlobalRand.Intn(my_types.Size),
+    }
+    sb.logger.Info(
+        "random shot",
+        "target", target,
+    )
+    sb.lastShot = target
+    return target
 }
 
 func (sb *SmartBot) SetResult(shotRes my_types.ShotResult) {
@@ -116,7 +93,6 @@ func (sb *SmartBot) SetResult(shotRes my_types.ShotResult) {
         )
     }
     if shotRes == my_types.Hit {
-        sb.lastHit = sb.lastShot
         if sb.state == StateRandom {
             sb.state = StateSink
             sb.memory = []my_types.Pair{sb.lastShot}
@@ -131,29 +107,17 @@ func (sb *SmartBot) SetResult(shotRes my_types.ShotResult) {
                 "first_shot", sb.lastShot,
                 "memory", sb.memory,
             )
+            sb.lastHit = sb.lastShot
         } else {
             var dir my_types.Pair
-            if len(sb.memory) == 0 {
-                dx := sb.lastShot.X - sb.lastHit.X
-                if dx != 0 {
-                    dir = my_types.Pair{X: 0, Y: 1}
-                } else {
-                    dir = my_types.Pair{X: 1, Y: 0}
-                }
-                sb.dir = &dir
-                sb.logger.Info("", "dir", sb.dir)
-                
+            dx := sb.lastShot.X - sb.lastHit.X
+            if dx != 0 {
+                dir = my_types.Pair{X: 1, Y: 0}
             } else {
-                first := sb.memory[0]
-                dx := sb.lastShot.X - first.X
-                if dx != 0 {
-                    dir = my_types.Pair{X: 0, Y: 1}
-                } else {
-                    dir = my_types.Pair{X: 1, Y: 0}
-                }
-                sb.dir = &dir
+                dir = my_types.Pair{X: 0, Y: 1}
             }
-
+            sb.dir = &dir
+            sb.logger.Info("", "dir", sb.dir)
 
             sb.memory = append(sb.memory, my_types.Pair{
                 X: sb.lastShot.X + dir.X,
@@ -173,10 +137,10 @@ func (sb *SmartBot) SetResult(shotRes my_types.ShotResult) {
                 "last", sb.lastShot,
             )
 
-            filtered_memory := []my_types.Pair{first}
-            for _, t := range sb.memory[1:] {
-                tdx := t.X - first.X
-                tdy := t.Y - first.Y
+            filtered_memory := []my_types.Pair{}
+            for _, t := range sb.memory {
+                tdx := t.X - sb.lastHit.X
+                tdy := t.Y - sb.lastHit.Y
                 if (dir.X != 0 && tdx != 0) || (dir.Y != 0 && tdy != 0) {
                     filtered_memory = append(filtered_memory, t)
                 }
@@ -186,6 +150,7 @@ func (sb *SmartBot) SetResult(shotRes my_types.ShotResult) {
                 "filtered memory",
                 "memory", sb.memory,
             )
+            sb.lastHit = sb.lastShot
         }
     }
     if shotRes == my_types.Miss {

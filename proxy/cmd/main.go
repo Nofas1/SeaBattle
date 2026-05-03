@@ -94,7 +94,6 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		p.logger.Error(string(body), "error", err)
 
 		ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*1500)
 		defer cancel()

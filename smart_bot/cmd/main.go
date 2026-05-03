@@ -14,7 +14,7 @@ import (
 
 type Bot interface {
 	Place() (int, int, my_types.Pair)
-	Shoot(*my_types.Field) my_types.Pair
+	Shoot() my_types.Pair
 	SetResult(my_types.ShotResult)
 }
 
@@ -30,21 +30,7 @@ func NewHandler(bot Bot, logger *slog.Logger) *Handler {
 func (h *Handler) ShootHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		var req struct {
-			Field [][]int `json:"field"`
-		}
-		err := json.NewDecoder(r.Body).Decode(&req)
-		if err != nil {
-			h.logger.Error(
-				"failed to decode field",
-				"source", "smart_bot",
-				"error", err,
-			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		shot := h.bot.Shoot(&my_types.Field{Matrix: req.Field})
+		shot := h.bot.Shoot()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(shot)

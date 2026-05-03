@@ -2,24 +2,24 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
-	"log/slog"
-	"os"
 	"flag"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
 	"sea_battle/my_types"
-	"sea_battle/smart_bot/internal"
 	"sea_battle/smart_bot/config"
+	"sea_battle/smart_bot/internal"
 )
 
-type Bot interface{
+type Bot interface {
 	Place() (int, int, my_types.Pair)
 	Shoot(*my_types.Field) my_types.Pair
 	SetResult(my_types.ShotResult)
 }
 
 type Handler struct {
-	bot Bot
+	bot    Bot
 	logger *slog.Logger
 }
 
@@ -31,9 +31,9 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var req struct {
-            Field [][]int `json:"field"`
-        }
-        err := json.NewDecoder(r.Body).Decode(&req)
+			Field [][]int `json:"field"`
+		}
+		err := json.NewDecoder(r.Body).Decode(&req)
 		if err != nil {
 			h.logger.Error(
 				"failed to decode field",
@@ -46,38 +46,39 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 
 		shot := h.bot.Shoot(&my_types.Field{Matrix: req.Field})
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(shot)
 		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(shot)
 	}
 }
 
 func (h *Handler) SetResultHandler() http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        defer r.Body.Close()
-        var req struct {
-            Result my_types.ShotResult `json:"result"`
-        }
-        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-            h.logger.Error(
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req struct {
+			Result   my_types.ShotResult `json:"result"`
+			LastShot my_types.Pair       `json:"last_shot"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			h.logger.Error(
 				"failed to decode shot result",
 				"source", "smart_bot",
 				"error", err,
 			)
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        h.bot.SetResult(req.Result)
-        w.WriteHeader(http.StatusOK)
-    }
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.bot.SetResult(req.Result)
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func (h *Handler) PlaceHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var req struct {
-            Field [][]int `json:"field"`
-        }
-        json.NewDecoder(r.Body).Decode(&req)
+			Field [][]int `json:"field"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
 		type PlaceResponse struct {
 			X   int           `json:"x"`
 			Y   int           `json:"y"`
@@ -93,14 +94,32 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 
 func main() {
 	var cfg_path string
+	var logLevel string
 	flag.StringVar(&cfg_path, "config", "config.yaml", "config path")
+	flag.StringVar(&logLevel, "log", "info", "log level: debug, info, warn, error")
 	flag.Parse()
+
 	cfg, err := config.LoadConfig(cfg_path)
 	if err != nil {
 		panic(err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	var level slog.Level
+	switch logLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	}))
+
 	var bot Bot = internal.NewSmartBot(logger)
 	h := NewHandler(bot, logger)
 
@@ -108,7 +127,7 @@ func main() {
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())
 
-	logger.Info("", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
+	logger.Info("Listening on", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.BotCfg.Address, cfg.BotCfg.Port), nil)
 	fmt.Println(err)
 }

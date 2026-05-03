@@ -1,13 +1,16 @@
 package internal
 
 import (
+	"log/slog"
 	"sea_battle/my_types"
 )
 
-type SimpleBot struct {}
+type SimpleBot struct {
+	logger *slog.Logger
+}
 
-func NewSimpleBot() *SimpleBot {
-	return &SimpleBot{}
+func NewSimpleBot(logger *slog.Logger) *SimpleBot {
+	return &SimpleBot{logger: logger}
 }
 
 func (sb *SimpleBot) Shoot(field *my_types.Field) my_types.Pair {
@@ -15,6 +18,10 @@ func (sb *SimpleBot) Shoot(field *my_types.Field) my_types.Pair {
 		target := my_types.Pair{X: my_types.GlobalRand.Intn(10), Y: my_types.GlobalRand.Intn(10)}
 		row, col := target.X, target.Y
 		if field.Matrix[row][col] == my_types.EMPTY || field.Matrix[row][col] == my_types.SHIP {
+			sb.logger.Info(
+				"random shot",
+				"target", target,
+            )
 			return target
 		}
 	}

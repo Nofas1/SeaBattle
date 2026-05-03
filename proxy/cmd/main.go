@@ -69,7 +69,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
-		resp.Body.Close()
+		defer resp.Body.Close()
 
 		if req.Action == "set_result" {
 			type SetResultRequest struct {
@@ -102,6 +102,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 		joinURL, err = url.JoinPath(baseURL, req.Action)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return 
 		}
 		new_req, err = http.NewRequestWithContext(ctx, "POST", joinURL, bytes.NewReader(body))
 		resp, err = p.client.Do(new_req)
@@ -123,7 +124,6 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -140,6 +140,8 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	proxy := NewProxy(client, cfg, logger)
 	http.HandleFunc("/", proxy.ProxyHandler())
+
+	logger.Info("Listening on", "Adr", cfg.Proxy.Address, "Port", cfg.Proxy.Port)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.Proxy.Address, cfg.Proxy.Port), nil)
 	fmt.Println(err)
 }

@@ -6,11 +6,6 @@ import (
 	"sea_battle/my_types"
 )
 
-// type Bot interface{
-// 	Shoot(*domain.Field) domain.Pair
-// 	SetResult(my_types.ShotResult)
-// }
-
 func Shoot(field *domain.Field, row, col int) my_types.ShotResult {
 	if field.Matrix[row][col] == my_types.SHOOTED || field.Matrix[row][col] == my_types.MISSED || field.Matrix[row][col] == my_types.FILL {
 		return my_types.Already

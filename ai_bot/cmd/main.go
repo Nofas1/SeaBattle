@@ -92,22 +92,39 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 
 func main() {
 	var cfg_path string
+	var logLevel string
 	flag.StringVar(&cfg_path, "config", "config.yaml", "config path")
+	flag.StringVar(&logLevel, "log", "info", "log level: debug, info, warn, error")
 	flag.Parse()
 	cfg, err := config.LoadConfig(cfg_path)
 	if err != nil {
 		panic(err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	var bot Bot = internal.NewAIBot()
+	var level slog.Level
+	switch logLevel {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	}))
+
+	var bot Bot = internal.NewAIBot(logger)
 	h := NewHandler(bot, logger)
 
 	http.HandleFunc("/shoot", h.ShootHandler())
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())
 
-	logger.Info("", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
+	logger.Info("Listening on", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.BotCfg.Address, cfg.BotCfg.Port), nil)
 	fmt.Println(err)
 }

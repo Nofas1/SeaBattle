@@ -240,7 +240,7 @@ func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, log
 				rl.DrawText("Bot unavailable!", 400, 300, 30, rl.Red)
 				continue
 			}
-			
+
 			if shotRes != my_types.Already {
 				rl.PlaySound(hit_sound)
 				if shotRes == my_types.Sink {

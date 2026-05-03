@@ -12,7 +12,7 @@ type BotConfig struct {
 }
 
 type Config struct {
-	BotCfg BotConfig `yaml:"smart_bot"`
+	BotCfg BotConfig `yaml:"simple_bot"`
 }
 
 func LoadConfig(path string) (*Config, error) {

@@ -1,12 +1,13 @@
 package internal
 
 import (
-	"fmt"
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
+	"sea_battle/my_types"
 	"strconv"
 	"strings"
-	"sea_battle/my_types"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -17,9 +18,10 @@ type AIBot struct {
 	field [][]int
 	OpenAIClient openai.Client
 	api_key    string
+	logger *slog.Logger
 }
 
-func NewAIBot() *AIBot {
+func NewAIBot(logger *slog.Logger) *AIBot {
 	key, _ := os.LookupEnv("AI_KEY")
 	field := make([][]int, my_types.Size)
 	for i := 0; i < my_types.Size; i++ {
@@ -29,21 +31,9 @@ func NewAIBot() *AIBot {
 		field: field,
 		OpenAIClient: openai.NewClient(option.WithAPIKey(key)),
 		api_key: key,
+		logger: logger,
 	}
 }
-
-// func (ab *AIBot) translate_field(field *my_types.Field) string {
-// 	var res strings.Builder
-
-// 	for i := 0; i < my_types.Size; i++ {
-// 		for j := 0; j < my_types.Size; j++ {
-// 			res.WriteString(strconv.Itoa(field.Matrix[i][j]) + " ")
-// 		}
-// 		res.WriteString("\n")
-// 	}
-
-// 	return res.String()
-// }
 
 func (ab *AIBot) translateMatrix(matrix [][]int) string {
     var res strings.Builder
@@ -100,6 +90,14 @@ func (ab *AIBot) Place() (int, int, my_types.Pair) {
 			y := my_types.GlobalRand.Intn(my_types.Size)
 			ind := my_types.GlobalRand.Intn(4)
 			dir := my_types.Directions[ind]
+			target := my_types.Pair{
+                X: x,
+                Y: y,
+            }
+			ab.logger.Info(
+				"random shot",
+				"target", target,
+			)
 			return x, y, my_types.Pair{X: dir[0], Y: dir[1]}
         }
 
@@ -115,6 +113,14 @@ func (ab *AIBot) Place() (int, int, my_types.Pair) {
             continue
         }
         if x >= 0 && x < my_types.Size && y >= 0 && y < my_types.Size {
+			target := my_types.Pair{
+                X: x,
+                Y: y,
+            }
+			ab.logger.Info(
+				"ordinary ai shot",
+				"target", target,
+			)
             return x, y, my_types.Pair{X: dx, Y: dy}
         }
     }

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"sea_battle/Game/internal/domain"
@@ -72,13 +71,22 @@ func SelectBot(userField *domain.Field, music rl.Music, logger *slog.Logger) gam
 				rl.EndDrawing()
 				switch btn.label {
 				case "Simple Bot":
-					fmt.Printf("SimpleBot chosen")
+					logger.Info(
+						"bot selected",
+						"bot", "simple_bot",
+					)
 					return game.NewBotProxy(userField, "http://localhost:8085", "simple_bot", logger)
 				case "Smart Bot":
-					fmt.Printf("SmartBot chosen")
+					logger.Info(
+						"bot selected",
+						"bot", "smart_bot",
+					)
 					return game.NewBotProxy(userField, "http://localhost:8085", "smart_bot", logger)
 				case "AI Bot":
-					fmt.Printf("AIBot chosen")
+					logger.Info(
+						"bot selected",
+						"bot", "ai_bot",
+					)
 					return game.NewBotProxy(userField, "http://localhost:8085", "ai_bot", logger)
 				}
 			}
@@ -234,7 +242,7 @@ func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, log
 			}
 		} else if turn == false {
 			// timeout
-			shotRes, err := game.BotShot(bot, userField)
+			shotRes, err := game.BotShot(bot, userField, logger)
 			if err != nil {
 				logger.Error("bot error", "error", err)
 				rl.DrawText("Bot unavailable!", 400, 300, 30, rl.Red)

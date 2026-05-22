@@ -1,9 +1,11 @@
 services:
   proxy:
     ports:
-      - "8085:8085"
+      - "28080:28080"
     container_name:
       proxy
+    env_file:
+      - .env
     build:
       context: .
       dockerfile: proxy/Dockerfile
@@ -15,7 +17,7 @@ services:
       unless-stopped
   simple_bot:
     ports:
-      - "8081:8085"
+      - "8081:28080"
     container_name:
       simple_bot
     build:
@@ -25,7 +27,7 @@ services:
       unless-stopped
   smart_bot:
     ports:
-      - "8082:8085"
+      - "8082:28080"
     container_name:
       smart_bot
     build:
@@ -35,7 +37,7 @@ services:
       unless-stopped
   ai_bot:
     ports:
-      - "8083:8085"
+      - "8083:28080"
     container_name:
       ai_bot
     build:

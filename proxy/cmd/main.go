@@ -6,14 +6,26 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"sea_battle/my_types"
 	"sea_battle/proxy/config"
+	mw "sea_battle/proxy/middleware"
+	"strings"
 	"time"
 )
+
+type AuthRequest struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+type AuthResponse struct {
+	Token string `json:"token"`
+}
 
 type Proxy struct {
 	client *http.Client
@@ -126,6 +138,80 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 	}
 }
 
+func LoginHandler(auth mw.AAA) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req AuthRequest
+
+		err := json.NewDecoder(r.Body).Decode(&req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		token, err := auth.Login(req.Name, req.Password)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		json.NewEncoder(w).Encode(AuthResponse{
+			Token: token,
+		})
+	}
+}
+
+func RegisterHandler(auth mw.AAA) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req AuthRequest
+		body, _ := io.ReadAll(r.Body)
+		fmt.Printf("%s", string(body))
+		err := json.Unmarshal(body, &req)
+		// err := json.NewDecoder(body).Decode(&req)
+		
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		err = auth.Register(req.Name, req.Password)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+	}
+}
+
+func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+			return
+		}
+
+		bearer_token := strings.Split(authHeader, " ")
+		if strings.ToLower(bearer_token[0]) != "bearer" || len(bearer_token) != 2 {
+			http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := bearer_token[1]
+
+		if _, err := auth.Verify(tokenString); err != nil {
+			p.logger.Error(
+				"Token verification failed",
+				"error", err,
+			)
+			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
+}
+
 func main() {
 	var cfg_path string
 	flag.StringVar(&cfg_path, "config", "config.yaml", "config path")
@@ -138,7 +224,15 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	proxy := NewProxy(client, cfg, logger)
-	http.HandleFunc("/", proxy.ProxyHandler())
+
+	authService, err := mw.New(time.Hour, logger)
+	if err != nil {
+		panic(err)
+	}
+	
+	http.HandleFunc("/login", LoginHandler(authService))
+	http.HandleFunc("/register", RegisterHandler(authService))
+	http.Handle("/bot", proxy.AuthHandler(authService, http.HandlerFunc(proxy.ProxyHandler())))
 
 	logger.Info("Listening on", "Adr", cfg.Proxy.Address, "Port", cfg.Proxy.Port)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.Proxy.Address, cfg.Proxy.Port), nil)

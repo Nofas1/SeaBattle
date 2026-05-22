@@ -1,11 +1,11 @@
 proxy: 
   address: "0.0.0.0"
-  port: 8085
+  port: 28080
 bots:
   simple_bot:
-    url: "http://simple_bot:8085"
+    url: "http://simple_bot:28080"
   smart_bot:
-    url: "http://smart_bot:8085"
+    url: "http://smart_bot:28080"
   ai_bot:
-    url: "http://ai_bot:8085"
+    url: "http://ai_bot:28080"
 

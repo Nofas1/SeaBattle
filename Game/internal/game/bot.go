@@ -21,6 +21,7 @@ type BotProxy struct {
 	field   *domain.Field
 	baseURL string
 	botName string
+	token string
 	logger  *slog.Logger
 	client  *http.Client
 }
@@ -32,8 +33,8 @@ type ProxyRequest struct {
 	Result my_types.ShotResult `json:"result"`
 }
 
-func NewBotProxy(field *domain.Field, url string, botName string, logger *slog.Logger) *BotProxy {
-	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger}
+func NewBotProxy(field *domain.Field, url string, botName string, logger *slog.Logger, token string) *BotProxy {
+	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger, token: token}
 }
 
 func (bp *BotProxy) Shoot() (domain.Pair, error) {
@@ -41,12 +42,13 @@ func (bp *BotProxy) Shoot() (domain.Pair, error) {
 		Name:   bp.botName,
 		Action: "shoot",
 	})
-	joinURL, _ := url.JoinPath(bp.baseURL, "/")
+	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
 	if err != nil {
 		return domain.Pair{}, fmt.Errorf("shoot: failed to create request: %w\n", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer " + bp.token)
 	resp, err := bp.client.Do(req)
 	if err != nil {
 		return domain.Pair{}, fmt.Errorf("shoot: bot unavailable: %w\n", err)
@@ -65,12 +67,13 @@ func (bp *BotProxy) Place() (int, int, domain.Pair, error) {
 		Field:  bp.field.Matrix,
 		Action: "place",
 	})
-	joinURL, _ := url.JoinPath(bp.baseURL, "/")
+	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
 	if err != nil {
 		return 0, 0, domain.Pair{}, fmt.Errorf("place: failed to create request: %w\n", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer " + bp.token)
 	resp, err := bp.client.Do(req)
 	if err != nil {
 		return 0, 0, domain.Pair{}, fmt.Errorf("place: bot unavailable: %w\n", err)
@@ -98,12 +101,13 @@ func (bp *BotProxy) SetResult(result my_types.ShotResult) error {
 		Result: result,
 		Action: "set_result",
 	})
-	joinURL, _ := url.JoinPath(bp.baseURL, "/")
+	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("set_result: failed to create request: %w\n", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer " + bp.token)
 	resp, err := bp.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("set_result: bot unavailable: %w\n", err)

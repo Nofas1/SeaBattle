@@ -4,6 +4,8 @@ COPY . /proxy
 
 WORKDIR /proxy
 
-EXPOSE 8085
+EXPOSE 28080
+
+
 
 ENTRYPOINT [ "go", "run", "proxy/cmd/main.go", "--config=proxy/config.yaml" ]

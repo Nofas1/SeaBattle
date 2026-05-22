@@ -4,6 +4,6 @@ COPY . /simple_bot
 
 WORKDIR /simple_bot
 
-EXPOSE 8085
+EXPOSE 28080
 
 ENTRYPOINT [ "go", "run", "simple_bot/cmd/main.go", "--config=simple_bot/config.yaml" ]

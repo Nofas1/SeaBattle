@@ -1,7 +1,6 @@
 package main
 
 import (
-  // "sea_battle/my_types"
   "sea_battle/Game/internal/domain"
   "sea_battle/Game/internal/ui"
 )

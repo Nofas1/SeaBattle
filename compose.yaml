@@ -28,13 +28,15 @@ services:
   smart_bot:
     ports:
       - "8082:28080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     container_name:
       smart_bot
+    env_file:
+      - smart_bot/.env
     build:
       context: .
       dockerfile: smart_bot/Dockerfile
-    restart:
-      unless-stopped
   ai_bot:
     ports:
       - "8083:28080"

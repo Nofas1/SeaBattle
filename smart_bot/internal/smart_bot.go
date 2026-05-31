@@ -1,38 +1,32 @@
 package internal
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"sea_battle/my_types"
-)
-
-type State int
-
-const (
-    StateRandom State = iota
-    StateSink
+	"sea_battle/smart_bot/internal/repository"
 )
 
 type SmartBot struct {
-    state  State
-    memory []my_types.Pair
-    dir    *my_types.Pair
-    lastShot my_types.Pair
-    lastHit my_types.Pair
+    rep *repository.Repo
     logger *slog.Logger
 }
 
 func NewSmartBot(logger *slog.Logger) *SmartBot {
+    rep, err := repository.NewRepository()
+    if err != nil {
+        logger.Error("", "error", err)
+        panic("failed to connect to database")
+    }
 	return &SmartBot{
-        state: StateRandom,
-		memory:   make([]my_types.Pair, 0),
+        rep: rep,
         logger: logger,
 	}
 }
 
-func (sb *SmartBot) reset() {
-    sb.state = StateRandom
-	sb.memory = make([]my_types.Pair, 0)
-	sb.dir = nil
+func (sb *SmartBot) reset(user_key string) error {
+    return sb.rep.Reset(context.Background(), user_key)
 }
 
 func (sb *SmartBot) Place() (int, int, my_types.Pair) {
@@ -43,121 +37,110 @@ func (sb *SmartBot) Place() (int, int, my_types.Pair) {
     return x, y, my_types.Pair{X: dir[0], Y: dir[1]}
 }
 
-func (sb *SmartBot) Shoot() my_types.Pair {
-    sb.logger.Debug(
-        "shoot called",
-        "state", sb.state,
-        "memory", sb.memory,
-    )
-    if sb.state == StateSink {
-        for len(sb.memory) > 0 {
-            next := sb.memory[0]
-            sb.memory = sb.memory[1:]
-            sb.logger.Info(
-                "sink shot",
-                "target", next,
-                "memory_left", sb.memory,
-            )
-            sb.lastShot = next
-            return next
-        }
-        sb.reset()
+func (sb *SmartBot) Shoot(userKey string) (my_types.Pair, error) {
+    ctx := context.Background()
+    state, err := sb.rep.GetState(ctx, userKey)
+    if err != nil {
+        sb.logger.Error(err.Error())
+        return my_types.Pair{}, err
     }
+
+    sb.logger.Debug("shoot called", "state", state.State, "memory", state.Memory)
+
+    if state.State == repository.StateSink {
+        if len(state.Memory) > 0 {
+            next := state.Memory[0]
+            state.Memory = state.Memory[1:]
+            state.LastShot = next
+
+            if err := sb.rep.SetState(ctx, userKey, state); err != nil {
+                return my_types.Pair{}, fmt.Errorf("failed to save state: %w", err)
+            }
+            sb.logger.Info("sink shot", "target", next, "memory_left", state.Memory)
+            return next, nil
+        }
+        
+        if err := sb.reset(userKey); err != nil {
+            return my_types.Pair{}, fmt.Errorf("failed to reset: %w", err)
+        }
+    }
+
     target := my_types.Pair{
         X: my_types.GlobalRand.Intn(my_types.Size),
         Y: my_types.GlobalRand.Intn(my_types.Size),
     }
-    sb.logger.Info(
-        "random shot",
-        "target", target,
-    )
-    sb.lastShot = target
-    return target
+    state.LastShot = target
+    if err := sb.rep.SetState(ctx, userKey, state); err != nil {
+        return my_types.Pair{}, fmt.Errorf("failed to save state: %w", err)
+    }
+    sb.logger.Info("random shot", "target", target)
+    return target, nil
 }
 
-func (sb *SmartBot) SetResult(shotRes my_types.ShotResult) {
-    sb.logger.Info(
-        "shot result",
-        "result", shotRes,
-        "last_shot", sb.lastShot,
-        "state", sb.state,
-    )
+func (sb *SmartBot) SetResult(userKey string, shotRes my_types.ShotResult) {
+    ctx := context.Background()
+
     if shotRes == my_types.Already {
         return
     }
+
     if shotRes == my_types.Sink {
-        sb.reset()
-        sb.logger.Debug(
-        "reset after sink",
-        "memory", sb.memory,
-        )
+        sb.logger.Debug("reset after sink")
+        sb.reset(userKey)
+        return
     }
+
+    state, err := sb.rep.GetState(ctx, userKey)
+    if err != nil {
+        state = repository.BotState{}
+    }
+
+    sb.logger.Info("shot result", "result", shotRes, "last_shot", state.LastShot, "state", state.State)
+
     if shotRes == my_types.Hit {
-        if sb.state == StateRandom {
-            sb.state = StateSink
-            sb.memory = []my_types.Pair{sb.lastShot}
+        if state.State == repository.StateRandom {
+            state.State = repository.StateSink
+            state.Memory = []my_types.Pair{state.LastShot}
             for _, d := range my_types.Directions {
-                sb.memory = append(sb.memory, my_types.Pair{
-                    X: sb.lastShot.X + d[0],
-                    Y: sb.lastShot.Y + d[1],
+                state.Memory = append(state.Memory, my_types.Pair{
+                    X: state.LastShot.X + d[0],
+                    Y: state.LastShot.Y + d[1],
                 })
             }
-            sb.logger.Debug(
-                "first hit",
-                "first_shot", sb.lastShot,
-                "memory", sb.memory,
-            )
-            sb.lastHit = sb.lastShot
+            state.LastHit = state.LastShot
+            sb.logger.Debug("first hit", "first_shot", state.LastShot, "memory", state.Memory)
         } else {
+            dx := state.LastShot.X - state.LastHit.X
             var dir my_types.Pair
-            dx := sb.lastShot.X - sb.lastHit.X
             if dx != 0 {
                 dir = my_types.Pair{X: 1, Y: 0}
             } else {
                 dir = my_types.Pair{X: 0, Y: 1}
             }
-            sb.dir = &dir
-            sb.logger.Info("", "dir", sb.dir)
+            state.Dir = &dir
 
-            sb.memory = append(sb.memory, my_types.Pair{
-                X: sb.lastShot.X + dir.X,
-                Y: sb.lastShot.Y + dir.Y,
+            state.Memory = append(state.Memory, my_types.Pair{
+                X: state.LastShot.X + dir.X,
+                Y: state.LastShot.Y + dir.Y,
+            })
+            state.Memory = append(state.Memory, my_types.Pair{
+                X: state.LastShot.X - dir.X,
+                Y: state.LastShot.Y - dir.Y,
             })
 
-            sb.memory = append(sb.memory, my_types.Pair{
-                X: sb.lastShot.X - dir.X,
-                Y: sb.lastShot.Y - dir.Y,
-            })
-
-            first := sb.memory[0]
-            sb.logger.Debug(
-                "direction determined",
-                "dir", dir,
-                "first", first,
-                "last", sb.lastShot,
-            )
-
-            filtered_memory := []my_types.Pair{}
-            for _, t := range sb.memory {
-                tdx := t.X - sb.lastHit.X
-                tdy := t.Y - sb.lastHit.Y
+            filtered := []my_types.Pair{}
+            for _, t := range state.Memory {
+                tdx := t.X - state.LastHit.X
+                tdy := t.Y - state.LastHit.Y
                 if (dir.X != 0 && tdx != 0) || (dir.Y != 0 && tdy != 0) {
-                    filtered_memory = append(filtered_memory, t)
+                    filtered = append(filtered, t)
                 }
             }
-            sb.memory = filtered_memory
-            sb.logger.Debug(
-                "filtered memory",
-                "memory", sb.memory,
-            )
-            sb.lastHit = sb.lastShot
+            state.Memory = filtered
+            state.LastHit = state.LastShot
+            sb.logger.Debug("filtered memory", "memory", state.Memory)
         }
     }
-    if shotRes == my_types.Miss {
-        sb.logger.Debug(
-            "miss",
-            "memory", sb.memory,
-            "dir", sb.dir,
-        )
-    }
+
+    sb.rep.SetState(ctx, userKey, state)
 }

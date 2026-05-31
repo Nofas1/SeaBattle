@@ -6,15 +6,15 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
+	// "io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"sea_battle/my_types"
 	"sea_battle/proxy/config"
-	mw "sea_battle/proxy/middleware"
-	"strings"
+	// mw "sea_battle/proxy/middleware"
+	// "strings"
 	"time"
 )
 
@@ -44,10 +44,11 @@ func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *Pro
 func (p *Proxy) ProxyHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		type ProxyRequest struct {
-			Name   string  `json:"name"`
-			Field  [][]int `json:"field"`
-			Action string  `json:"action"`
-			Result my_types.ShotResult `json:"result,omitempty"`
+			Name    string              `json:"name"`
+			Field   [][]int             `json:"field"`
+			Action  string              `json:"action"`
+			Result  my_types.ShotResult `json:"result,omitempty"`
+			UserKey string              `json:"user_key"`
 		}
 
 		type ProxyResponse struct {
@@ -95,7 +96,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			return
 		}
 
-		type Request struct{
+		type Request struct {
 			Field [][]int `json:"field"`
 		}
 		var body_req Request
@@ -113,7 +114,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 		joinURL, err = url.JoinPath(baseURL, req.Action)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return 
+			return
 		}
 		new_req, err = http.NewRequestWithContext(ctx, "POST", joinURL, bytes.NewReader(body))
 		resp, err = p.client.Do(new_req)
@@ -138,79 +139,87 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 	}
 }
 
-func LoginHandler(auth mw.AAA) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req AuthRequest
-
-		err := json.NewDecoder(r.Body).Decode(&req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		token, err := auth.Login(req.Name, req.Password)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
-			return
-		}
-
-		json.NewEncoder(w).Encode(AuthResponse{
-			Token: token,
-		})
-	}
+func Matches() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {}
 }
 
-func RegisterHandler(auth mw.AAA) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req AuthRequest
-		body, _ := io.ReadAll(r.Body)
-		fmt.Printf("%s", string(body))
-		err := json.Unmarshal(body, &req)
-		// err := json.NewDecoder(body).Decode(&req)
-		
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		err = auth.Register(req.Name, req.Password)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		w.WriteHeader(http.StatusCreated)
-	}
+func Result() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {}
 }
 
-func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
-			return
-		}
+// func LoginHandler(auth mw.AAA) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		var req AuthRequest
 
-		bearer_token := strings.Split(authHeader, " ")
-		if strings.ToLower(bearer_token[0]) != "bearer" || len(bearer_token) != 2 {
-			http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
-			return
-		}
+// 		err := json.NewDecoder(r.Body).Decode(&req)
+// 		if err != nil {
+// 			http.Error(w, err.Error(), http.StatusBadRequest)
+// 			return
+// 		}
 
-		tokenString := bearer_token[1]
+// 		token, err := auth.Login(req.Name, req.Password)
+// 		if err != nil {
+// 			http.Error(w, err.Error(), http.StatusUnauthorized)
+// 			return
+// 		}
 
-		if _, err := auth.Verify(tokenString); err != nil {
-			p.logger.Error(
-				"Token verification failed",
-				"error", err,
-			)
-			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
-			return
-		}
+// 		json.NewEncoder(w).Encode(AuthResponse{
+// 			Token: token,
+// 		})
+// 	}
+// }
 
-		next.ServeHTTP(w, r)
-	}
-}
+// func RegisterHandler(auth mw.AAA) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		var req AuthRequest
+// 		body, _ := io.ReadAll(r.Body)
+// 		fmt.Printf("%s", string(body))
+// 		err := json.Unmarshal(body, &req)
+// 		// err := json.NewDecoder(body).Decode(&req)
+
+// 		if err != nil {
+// 			http.Error(w, err.Error(), http.StatusBadRequest)
+// 			return
+// 		}
+
+// 		err = auth.Register(req.Name, req.Password)
+// 		if err != nil {
+// 			http.Error(w, err.Error(), http.StatusBadRequest)
+// 			return
+// 		}
+
+// 		w.WriteHeader(http.StatusCreated)
+// 	}
+// }
+
+// func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
+// 	return func(w http.ResponseWriter, r *http.Request) {
+// 		authHeader := r.Header.Get("Authorization")
+// 		if authHeader == "" {
+// 			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+// 			return
+// 		}
+
+// 		bearer_token := strings.Split(authHeader, " ")
+// 		if strings.ToLower(bearer_token[0]) != "bearer" || len(bearer_token) != 2 {
+// 			http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+// 			return
+// 		}
+
+// 		tokenString := bearer_token[1]
+
+// 		if _, err := auth.Verify(tokenString); err != nil {
+// 			p.logger.Error(
+// 				"Token verification failed",
+// 				"error", err,
+// 			)
+// 			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+// 			return
+// 		}
+
+// 		next.ServeHTTP(w, r)
+// 	}
+// }
 
 func main() {
 	var cfg_path string
@@ -224,15 +233,16 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	proxy := NewProxy(client, cfg, logger)
+	http.HandleFunc("/bot", proxy.ProxyHandler())
 
-	authService, err := mw.New(time.Hour, logger)
-	if err != nil {
-		panic(err)
-	}
-	
-	http.HandleFunc("/login", LoginHandler(authService))
-	http.HandleFunc("/register", RegisterHandler(authService))
-	http.Handle("/bot", proxy.AuthHandler(authService, http.HandlerFunc(proxy.ProxyHandler())))
+	// authService, err := mw.New(time.Hour, logger)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// http.HandleFunc("/login", LoginHandler(authService))
+	// http.HandleFunc("/register", RegisterHandler(authService))
+	// http.Handle("/bot", proxy.AuthHandler(authService, http.HandlerFunc(proxy.ProxyHandler())))
 
 	logger.Info("Listening on", "Adr", cfg.Proxy.Address, "Port", cfg.Proxy.Port)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.Proxy.Address, cfg.Proxy.Port), nil)

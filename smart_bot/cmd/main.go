@@ -13,9 +13,9 @@ import (
 )
 
 type Bot interface {
-	Place() (int, int, my_types.Pair)
-	Shoot() my_types.Pair
-	SetResult(my_types.ShotResult)
+	Place() (int, int, my_types.Pair) // returns ship placement coordinates and direction
+	Shoot(string) (my_types.Pair, error) // returns target coordinates for the given user session
+	SetResult(string, my_types.ShotResult) // updates bot state based on shot result
 }
 
 type Handler struct {
@@ -27,20 +27,42 @@ func NewHandler(bot Bot, logger *slog.Logger) *Handler {
 	return &Handler{bot: bot, logger: logger}
 }
 
+// POST /shoot requests
+// decodes user_key from body, calls bot.Shoot and returns target coordinates
 func (h *Handler) ShootHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		shot := h.bot.Shoot()
+		var req struct {
+			UserKey string `json:"user_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			h.logger.Error(
+				"failed to decode UserKey",
+				"source", "smart_bot",
+				"error", err,
+			)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		shot, err := h.bot.Shoot(req.UserKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return 
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(shot)
 	}
 }
 
+// POST /set_result requests
+// decodes user_key and shot result, updates bot internal state
 func (h *Handler) SetResultHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 		var req struct {
+			UserKey  string              `json:"user_key"`
 			Result   my_types.ShotResult `json:"result"`
 			LastShot my_types.Pair       `json:"last_shot"`
 		}
@@ -53,11 +75,13 @@ func (h *Handler) SetResultHandler() http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		h.bot.SetResult(req.Result)
+		h.bot.SetResult(req.UserKey, req.Result)
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
+// POST /place requests
+// returns random ship placement coordinates and direction
 func (h *Handler) PlaceHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -79,6 +103,7 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 }
 
 func main() {
+	// config parsing, log level parsing
 	var cfg_path string
 	var logLevel string
 	flag.StringVar(&cfg_path, "config", "config.yaml", "config path")
@@ -90,6 +115,7 @@ func main() {
 		panic(err)
 	}
 
+	// log level initialization
 	var level slog.Level
 	switch logLevel {
 	case "debug":

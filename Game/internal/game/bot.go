@@ -12,6 +12,7 @@ import (
 )
 
 type Bot interface {
+	StartGame() error
 	Place() (int, int, domain.Pair, error) // ask bot where to place next ship
 	Shoot() (domain.Pair, error) // ask bot where to shoot
 	SetResult(my_types.ShotResult) error // notify bot about shot result
@@ -23,7 +24,6 @@ type BotProxy struct {
     baseURL string         // proxy URL
     botName string         // bot identifier
     token   string         // JWT token for proxy authentication
-	user_key string
 	logger  *slog.Logger
 	client  *http.Client
 }
@@ -37,7 +37,26 @@ type ProxyRequest struct {
 }
 
 func NewBotProxy(field *domain.Field, url string, botName string, logger *slog.Logger, token string) *BotProxy {
-	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger, token: token, user_key: token}
+	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger, token: token}
+}
+
+func (bp *BotProxy) StartGame() error {
+	body, _ := json.Marshal(ProxyRequest{
+		Name:   bp.botName,
+		Action: "start_game",
+		UserKey: "userkey",
+	})
+	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
+	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("start_game: failed to create request: %w\n", err)
+	}
+	resp, err := bp.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("start_game: bot unavailable: %w\n", err)
+	}
+	defer resp.Body.Close()
+	return nil
 }
 
 func (bp *BotProxy) Shoot() (domain.Pair, error) {
@@ -96,17 +115,18 @@ func (bp *BotProxy) Place() (int, int, domain.Pair, error) {
 
 func (bp *BotProxy) SetResult(result my_types.ShotResult) error {
 	type SetResultRequest struct {
-		Name   string              `json:"name"`
-		Result my_types.ShotResult `json:"result"`
-		Action string              `json:"action"`
-		UserKey string             `json:"user_key"`
-	}
-	body, _ := json.Marshal(SetResultRequest{
-		Name:   bp.botName,
-		Result: result,
-		Action: "set_result",
-		UserKey: "userkey",
-	})
+        Name     string              `json:"name"`
+        Result   my_types.ShotResult `json:"result"`
+        Action   string              `json:"action"`
+        UserKey  string              `json:"user_key"`
+        LastShot domain.Pair         `json:"last_shot"`
+    }
+    body, _ := json.Marshal(SetResultRequest{
+        Name:     bp.botName,
+        Result:   result,
+        Action:   "set_result",
+        UserKey:  "userkey",
+    })
 	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
 	if err != nil {

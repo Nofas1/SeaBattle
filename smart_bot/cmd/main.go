@@ -10,12 +10,14 @@ import (
 	"sea_battle/my_types"
 	"sea_battle/smart_bot/config"
 	"sea_battle/smart_bot/internal"
+	// "sea_battle/smart_bot/db"
 )
 
 type Bot interface {
-	Place() (int, int, my_types.Pair) // returns ship placement coordinates and direction
-	Shoot(string) (my_types.Pair, error) // returns target coordinates for the given user session
+	Place() (int, int, my_types.Pair)      // returns ship placement coordinates and direction
+	Shoot(string) (my_types.Pair, error)   // returns target coordinates for the given user session
 	SetResult(string, my_types.ShotResult) // updates bot state based on shot result
+	StartGame(string) error // initialize fresh bot state
 }
 
 type Handler struct {
@@ -25,6 +27,36 @@ type Handler struct {
 
 func NewHandler(bot Bot, logger *slog.Logger) *Handler {
 	return &Handler{bot: bot, logger: logger}
+}
+
+func (h *Handler) StartGameHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req struct {
+			UserKey string `json:"user_key"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			h.logger.Error(
+				"failed to decode start game request",
+				"error", err,
+			)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return 
+		}
+
+		if err := h.bot.StartGame(req.UserKey); err != nil {
+			h.logger.Error(
+				"failed to start game",
+				"user_key", req.UserKey,
+				"error", err,
+			)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		h.logger.Info("game started", "user_key", req.UserKey)
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 // POST /shoot requests
@@ -45,10 +77,17 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 			return
 		}
 
+		h.logger.Info("shoot request received", "user_key", req.UserKey)
+
 		shot, err := h.bot.Shoot(req.UserKey)
 		if err != nil {
+			h.logger.Error(
+				"shoot failed",
+				"user_key", req.UserKey,
+				"error", err,
+			)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return 
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -135,6 +174,7 @@ func main() {
 	var bot Bot = internal.NewSmartBot(logger)
 	h := NewHandler(bot, logger)
 
+	http.HandleFunc("/start", h.StartGameHandler())
 	http.HandleFunc("/shoot", h.ShootHandler())
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())

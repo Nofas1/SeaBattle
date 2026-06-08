@@ -420,6 +420,7 @@ func Run(userField, botField *domain.Field) {
 	// }
 	token := "s10f9"
 	bot := SelectBot(userField, music, logger, token)
+	_ = bot.StartGame()
 	Placer(userField, cancel, music)
 	Battle(userField, botField, bot, music, logger)
 }

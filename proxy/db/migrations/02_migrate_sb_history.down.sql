@@ -1,1 +1,1 @@
-DROP IF EXISTS sb_history;
+DROP TABLE IF EXISTS sb_history;

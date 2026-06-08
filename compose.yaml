@@ -2,8 +2,7 @@ services:
   proxy:
     ports:
       - "28080:28080"
-    container_name:
-      proxy
+    container_name: proxy
     env_file:
       - .env
     build:
@@ -13,37 +12,45 @@ services:
       - simple_bot
       - smart_bot
       - ai_bot
-    restart:
-      unless-stopped
+    restart: unless-stopped
+    networks:
+      - sea_battle
+
   simple_bot:
     ports:
       - "8081:28080"
-    container_name:
-      simple_bot
+    container_name: simple_bot
     build:
       context: .
       dockerfile: simple_bot/Dockerfile
-    restart:
-      unless-stopped
+    restart: unless-stopped
+    networks:
+      - sea_battle
+
   smart_bot:
     ports:
       - "8082:28080"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    container_name:
-      smart_bot
+    container_name: smart_bot
     env_file:
       - smart_bot/.env
     build:
       context: .
       dockerfile: smart_bot/Dockerfile
+    restart: unless-stopped
+    networks:
+      - sea_battle
+
   ai_bot:
     ports:
       - "8083:28080"
-    container_name:
-      ai_bot
+    container_name: ai_bot
     build:
       context: .
       dockerfile: ai_bot/Dockerfile
-    restart:
-      unless-stopped
+    restart: unless-stopped
+    networks:
+      - sea_battle
+
+networks:
+  sea_battle:
+    driver: bridge

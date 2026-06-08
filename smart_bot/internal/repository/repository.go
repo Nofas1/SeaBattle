@@ -2,10 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sea_battle/my_types"
-
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
@@ -41,6 +42,8 @@ func NewRepository() (*Repo, error) {
         return nil, fmt.Errorf("DATABASE_URL not set")
     }
 
+    fmt.Println("DATABASE_URL =", connString)
+
     pool, err := pgxpool.New(context.Background(), connString)
     if err != nil {
         return nil, fmt.Errorf("failed to connect to db: %w", err)
@@ -51,20 +54,40 @@ func NewRepository() (*Repo, error) {
 
 // deletes all state and memory for a given user session
 // called when a ship is sunk or the game resets
-func (rep *Repo) Reset(ctx context.Context, user_key string) error {
-	memory_query :=  `DELETE FROM memory WHERE states_id = (SELECT states_id FROM states WHERE user_key = $1)`
-    _, err := rep.pool.Exec(ctx, memory_query, user_key)
+func (rep *Repo) ClearState(ctx context.Context, user_key string) error {
+    query := `DELETE FROM states WHERE user_key = $1`
+    _, err := rep.pool.Exec(ctx, query, user_key)
+    if err != nil {
+        return fmt.Errorf("failed to delete state: %w", err)
+    }
+    return nil
+}
+
+func (rep *Repo) ClearMemory(ctx context.Context, user_key string) error {
+    query := `DELETE FROM memory WHERE states_id = (SELECT states_id FROM states WHERE user_key = $1)`
+    _, err := rep.pool.Exec(ctx, query, user_key)
     if err != nil {
         return fmt.Errorf("failed to delete memory: %w", err)
     }
-	query := `DELETE FROM states WHERE user_key = $1`
-    _, err = rep.pool.Exec(ctx, query, user_key)
-    return err
+    return nil
 }
+
+func (rep *Repo) InitState(ctx context.Context, user_key string) error {
+    query := `INSERT INTO states (user_key, bot_state, direction_x, direction_y,
+        last_shot_x, last_shot_y, last_hit_x, last_hit_y)
+        VALUES ($1, false, 0, 0, -1, -1, -1, -1)`
+    
+    if _, err := rep.pool.Exec(ctx, query, user_key); err != nil {
+        return fmt.Errorf("failed to initialize start state: %w", err)
+    }
+    return nil
+}
+
 
 // saves the complete bot state for a user session
 func (rep *Repo) SetState(ctx context.Context, user_key string, bot_state BotState) error {
-    rep.Reset(ctx, user_key)
+    rep.ClearMemory(ctx, user_key)
+    rep.InitState(ctx, user_key)
 
     var dirX, dirY int
     if bot_state.Dir != nil {
@@ -72,13 +95,14 @@ func (rep *Repo) SetState(ctx context.Context, user_key string, bot_state BotSta
         dirY = bot_state.Dir.Y
     }
 
-    query := `
-        INSERT INTO states (user_key, bot_state, direction_x, direction_y,
-            last_shot_x, last_shot_y, last_hit_x, last_hit_y)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    query := 
+        `UPDATE states SET bot_state=$2, direction_x=$3, direction_y=$4,
+        last_shot_x=$5, last_shot_y=$6, last_hit_x=$7, last_hit_y=$8
+        WHERE user_key=$1
         RETURNING states_id`
 
     var statesID int
+
     err := rep.pool.QueryRow(ctx, query,
         user_key,
         bot_state.State == StateSink,
@@ -91,6 +115,7 @@ func (rep *Repo) SetState(ctx context.Context, user_key string, bot_state BotSta
     }
 
 	memory_query := `INSERT INTO memory (states_id, coord_x, coord_y) VALUES ($1, $2, $3)`
+
     for _, pair := range bot_state.Memory {
         _, err := rep.pool.Exec(ctx, memory_query, statesID, pair.X, pair.Y)
         if err != nil {
@@ -100,6 +125,7 @@ func (rep *Repo) SetState(ctx context.Context, user_key string, bot_state BotSta
     return nil
 }
 
+// retrieves the bot state for a user session
 func (rep *Repo) GetState(ctx context.Context, user_key string) (BotState, error) {
     query := `
         SELECT states_id, bot_state, direction_x, direction_y,
@@ -117,6 +143,9 @@ func (rep *Repo) GetState(ctx context.Context, user_key string) (BotState, error
         &lhX, &lhY,
     )
     if err != nil {
+        if errors.Is(err, pgx.ErrNoRows) {
+            return BotState{State: StateRandom}, nil // fresh session
+        }
         return BotState{}, fmt.Errorf("failed to get state: %w", err)
     }
 

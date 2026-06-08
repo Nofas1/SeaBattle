@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+
 	// "io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"sea_battle/my_types"
 	"sea_battle/proxy/config"
+
 	// mw "sea_battle/proxy/middleware"
 	// "strings"
 	"time"
@@ -55,86 +57,181 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			X int `json:"x"`
 			Y int `json:"y"`
 		}
-
 		defer r.Body.Close()
+
 		var req ProxyRequest
-		w.Header().Set("Content-Type", "application/json")
-
-		err := json.NewDecoder(r.Body).Decode(&req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		botCfg, exist := p.bots[req.Name]
-		baseURL := botCfg.URL
-		if !exist {
-			http.Error(w, "does not exist", http.StatusBadRequest)
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*1500)
-		defer cancel()
-
-		joinURL, err := url.JoinPath(baseURL, "health")
-		new_req, err := http.NewRequestWithContext(ctx, "GET", joinURL, nil)
-		resp, err := p.client.Do(new_req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusServiceUnavailable)
-			return
-		}
-		defer resp.Body.Close()
-
-		if req.Action == "set_result" {
-			type SetResultRequest struct {
-				Result my_types.ShotResult `json:"result"`
-			}
-			body, _ := json.Marshal(SetResultRequest{Result: req.Result})
-			joinURL, _ := url.JoinPath(baseURL, "set_result")
-			new_req, _ := http.NewRequestWithContext(ctx, "POST", joinURL, bytes.NewReader(body))
-			p.client.Do(new_req)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		type Request struct {
-			Field [][]int `json:"field"`
-		}
-		var body_req Request
-		body_req.Field = req.Field
-
-		body, err := json.Marshal(body_req)
-		if err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			p.logger.Error("failed to decode request", "error", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*1500)
-		defer cancel()
-
-		joinURL, err = url.JoinPath(baseURL, req.Action)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		new_req, err = http.NewRequestWithContext(ctx, "POST", joinURL, bytes.NewReader(body))
-		resp, err = p.client.Do(new_req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		botCfg, exists := p.bots[req.Name]
+		if !exists {
+			p.logger.Error("bot not found", "name", req.Name)
+			http.Error(w, "bot not found", http.StatusBadRequest)
 			return
 		}
 
-		var botResp ProxyResponse
-
-		err = json.NewDecoder(resp.Body).Decode(&botResp)
+		healthURL, err := url.JoinPath(botCfg.URL, "health")
 		if err != nil {
+			p.logger.Error("failed to build health URL", "bot", req.Name, "error", err)
+			http.Error(w, "invalid bot URL", http.StatusInternalServerError)
+			return
+		}
+
+		healthCtx, healthCancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
+		defer healthCancel()
+
+		healthReq, err := http.NewRequestWithContext(healthCtx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			p.logger.Error("failed to create health request", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		err = json.NewEncoder(w).Encode(botResp)
+		healthResp, err := p.client.Do(healthReq)
 		if err != nil {
+			p.logger.Error("bot health check failed", "bot", req.Name, "error", err)
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		healthResp.Body.Close()
+
+		if req.Action == "start_game" {
+			type StartGameRequest struct {
+				UserKey string `json:"user_key"`
+			}
+			sgBody, err := json.Marshal(StartGameRequest{UserKey: req.UserKey})
+			if err != nil {
+				p.logger.Error("failed to marshal start_game", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			
+			sgURL, err := url.JoinPath(botCfg.URL, "start")
+			if err != nil {
+				p.logger.Error("failed to build start_game URL", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			sgCtx, sgCancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
+			defer sgCancel()
+
+			sgReq, err := http.NewRequestWithContext(sgCtx, http.MethodPost, sgURL, bytes.NewReader(sgBody))
+			if err != nil {
+				p.logger.Error("failed to create start_game request", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			sgReq.Header.Set("Content-Type", "application/json")
+
+			sgResp, err := p.client.Do(sgReq)
+			if err != nil {
+				p.logger.Error("start_game call failed", "bot", req.Name, "error", err)
+			} else {
+				sgResp.Body.Close()
+			}
+
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+
+		if req.Action == "set_result" {
+			type SetResultRequest struct {
+				Result  my_types.ShotResult `json:"result"`
+				UserKey string              `json:"user_key"`
+			}
+
+			srBody, err := json.Marshal(SetResultRequest{Result: req.Result, UserKey: req.UserKey})
+			if err != nil {
+				p.logger.Error("failed to marshal set_result", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			srURL, err := url.JoinPath(botCfg.URL, "set_result")
+			if err != nil {
+				p.logger.Error("failed to build set_result URL", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			srCtx, srCancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
+			defer srCancel()
+
+			srReq, err := http.NewRequestWithContext(srCtx, http.MethodPost, srURL, bytes.NewReader(srBody))
+			if err != nil {
+				p.logger.Error("failed to create set_result request", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			srReq.Header.Set("Content-Type", "application/json")
+
+			srResp, err := p.client.Do(srReq)
+			if err != nil {
+				p.logger.Error("set_result call failed", "bot", req.Name, "error", err)
+			} else {
+				srResp.Body.Close()
+			}
+
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		type BotRequest struct {
+			Field   [][]int `json:"field"`
+			UserKey string  `json:"user_key"`
+		}
+
+		botBody, err := json.Marshal(BotRequest{Field: req.Field, UserKey: req.UserKey})
+		if err != nil {
+			p.logger.Error("failed to marshal bot request", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		botURL, err := url.JoinPath(botCfg.URL, req.Action)
+		if err != nil {
+			p.logger.Error("failed to build action URL", "action", req.Action, "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		botCtx, botCancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
+		defer botCancel()
+
+		botReq, err := http.NewRequestWithContext(botCtx, http.MethodPost, botURL, bytes.NewReader(botBody))
+		if err != nil {
+			p.logger.Error("failed to create bot request", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		botReq.Header.Set("Content-Type", "application/json")
+
+		botResp, err := p.client.Do(botReq)
+		if err != nil {
+			p.logger.Error("bot request failed", "bot", req.Name, "action", req.Action, "error", err)
+			http.Error(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		defer botResp.Body.Close()
+
+		var result ProxyResponse
+		if err := json.NewDecoder(botResp.Body).Decode(&result); err != nil {
+			p.logger.Error("failed to decode bot response",
+				"bot", req.Name,
+				"action", req.Action,
+				"error", err,
+			)
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			p.logger.Error("failed to encode response", "error", err)
 		}
 	}
 }

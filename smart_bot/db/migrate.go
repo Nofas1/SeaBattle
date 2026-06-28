@@ -10,7 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-//go:embed migrations\*.sql
+//go:embed migrations/*.sql
 var migrationFiles embed.FS
 
 type Migrator struct {

@@ -17,7 +17,7 @@ type SmartBot struct {
 }
 
 func NewSmartBot(logger *slog.Logger) *SmartBot {
-    rep, err := repository.NewRepository()
+    rep, err := repository.NewRepository(logger)
     if err != nil {
         logger.Error("failed to initialize repository", "error", err)
         panic("failed to connect to database")
@@ -79,9 +79,14 @@ func (sb *SmartBot) Shoot(userKey string) (my_types.Pair, error) {
     )
 
     if state.State == repository.StateSink {
-        if len(state.Memory) > 0 {
+        for len(state.Memory) > 0 {
             next := state.Memory[0]
             state.Memory = state.Memory[1:]
+
+            if next.X < 0 || next.X >= my_types.Size || next.Y < 0 || next.Y >= my_types.Size {
+                continue
+            }
+
             state.LastShot = next
 
             if err := sb.rep.SetState(ctx, userKey, state); err != nil {
@@ -112,11 +117,16 @@ func (sb *SmartBot) SetResult(userKey string, shotRes my_types.ShotResult) {
     ctx := context.Background()
 
     if shotRes == my_types.Already {
-        state, _ := sb.rep.GetState(ctx, userKey)
-
+        state, err := sb.rep.GetState(ctx, userKey)
+         if err != nil {
+            sb.logger.Error("failed to get state for Already", "error", err)
+            return
+        }
         if len(state.Memory) > 0 {
             state.Memory = state.Memory[1:]
-            sb.rep.SetState(ctx, userKey, state)
+            if err := sb.rep.SetState(ctx, userKey, state); err != nil {
+                sb.logger.Error("failed to save state after Already", "error", err)
+            }
         }
 
         return
@@ -195,10 +205,19 @@ func (sb *SmartBot) SetResult(userKey string, shotRes my_types.ShotResult) {
         }
     }
 
-    sb.logger.Info("saving state after hit",
+    sb.logger.Info(
+        "saving state after hit",
         "new_state", state.State,
         "memory", state.Memory,
     )
 
     sb.rep.SetState(ctx, userKey, state)
+}
+
+func (sb *SmartBot) GameOver(userKey string) error {
+    ctx := context.Background()
+    if err := sb.rep.ClearState(ctx, userKey); err != nil {
+        return fmt.Errorf("failed to reset: %w", err)
+    }
+    return nil
 }

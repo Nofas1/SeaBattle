@@ -349,9 +349,11 @@ func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, log
 		DrawGrid(botOffsetX, offsetY, botField.Matrix, true)
 
 		if user_sunk == 10 {
+			_ = bot.GameOver(true)
 			break
 		}
 		if bot_sunk == 10 {
+			_ = bot.GameOver(false)
 			break
 		}
 

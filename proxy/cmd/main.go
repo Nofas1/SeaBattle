@@ -14,6 +14,8 @@ import (
 	"os"
 	"sea_battle/my_types"
 	"sea_battle/proxy/config"
+	// "sea_battle/proxy/db"
+	"sea_battle/proxy/repository"
 
 	// mw "sea_battle/proxy/middleware"
 	// "strings"
@@ -31,13 +33,21 @@ type AuthResponse struct {
 
 type Proxy struct {
 	client *http.Client
+	rep *repository.Repo
 	bots   map[string]config.BotConfig
 	logger *slog.Logger
 }
 
 func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *Proxy {
+	rep, err := repository.NewRepository(logger)
+    if err != nil {
+        logger.Error("proxy: failed to initialize repository", "error", err)
+        panic("failed to connect to database")
+    }
+    logger.Info("proxy initialized successfully")
 	return &Proxy{
 		client: client,
+		rep: rep,
 		bots:   cfg.Bots,
 		logger: logger,
 	}
@@ -50,6 +60,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			Field   [][]int             `json:"field"`
 			Action  string              `json:"action"`
 			Result  my_types.ShotResult `json:"result,omitempty"`
+			UserWin bool                `json:"user_win,omitempty"`
 			UserKey string              `json:"user_key"`
 		}
 
@@ -108,7 +119,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			
+
 			sgURL, err := url.JoinPath(botCfg.URL, "start")
 			if err != nil {
 				p.logger.Error("failed to build start_game URL", "error", err)
@@ -180,6 +191,63 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			return
 		}
 
+		if req.Action == "game_over" {
+			type GameOverRequest struct {
+				UserKey string `json:"user_key"`
+			}
+
+			goBody, err := json.Marshal(GameOverRequest{UserKey: req.UserKey})
+			if err != nil {
+				p.logger.Error("failed to marshal game_over", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			goURL, err := url.JoinPath(botCfg.URL, "game_over")
+			if err != nil {
+				p.logger.Error("failed to build game_over URL", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			goCtx, goCancel := context.WithTimeout(r.Context(), 1500*time.Millisecond)
+			defer goCancel()
+
+			goReq, err := http.NewRequestWithContext(goCtx, http.MethodPost, goURL, bytes.NewReader(goBody))
+			if err != nil {
+				p.logger.Error("failed to create game_over request", "error", err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			goReq.Header.Set("Content-Type", "application/json")
+
+			goResp, err := p.client.Do(goReq)
+			if err != nil {
+				p.logger.Error("game_over call failed", "bot", req.Name, "error", err)
+			} else {
+				goResp.Body.Close()
+			}
+
+			if err := p.rep.SetResult(context.Background(), req.UserKey, req.UserWin); err != nil {
+				p.logger.Error(
+					"failed to save match result",
+					"user_key", req.UserKey,
+					"user_win", req.UserWin,
+					"error", err,
+				)
+			} else {
+				p.logger.Info(
+					"match result saved",
+					"user_key", req.UserKey,
+					"user_win", req.UserWin,
+				)
+			}
+
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		type BotRequest struct {
 			Field   [][]int `json:"field"`
 			UserKey string  `json:"user_key"`
@@ -234,14 +302,6 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			p.logger.Error("failed to encode response", "error", err)
 		}
 	}
-}
-
-func Matches() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {}
-}
-
-func Result() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {}
 }
 
 // func LoginHandler(auth mw.AAA) http.HandlerFunc {

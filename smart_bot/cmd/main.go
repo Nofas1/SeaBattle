@@ -18,6 +18,7 @@ type Bot interface {
 	Shoot(string) (my_types.Pair, error)   // returns target coordinates for the given user session
 	SetResult(string, my_types.ShotResult) // updates bot state based on shot result
 	StartGame(string) error // initialize fresh bot state
+	GameOver(string) error
 }
 
 type Handler struct {
@@ -141,6 +142,26 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 	}
 }
 
+func (h *Handler) GameOverHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req struct {
+			UserKey string `json:"user_key"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		err := h.bot.GameOver(req.UserKey)
+		if err != nil {
+			h.logger.Error(
+				"failed to clear state",
+				"error", err,
+			)
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+
 func main() {
 	// config parsing, log level parsing
 	var cfg_path string
@@ -178,6 +199,7 @@ func main() {
 	http.HandleFunc("/shoot", h.ShootHandler())
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())
+	http.HandleFunc("/game_over", h.GameOverHandler())
 
 	logger.Info("Listening on", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.BotCfg.Address, cfg.BotCfg.Port), nil)

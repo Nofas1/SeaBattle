@@ -9,21 +9,24 @@ import (
 	"net/url"
 	"sea_battle/Game/internal/domain"
 	"sea_battle/my_types"
+	"time"
 )
 
 type Bot interface {
 	StartGame() error
 	Place() (int, int, domain.Pair, error) // ask bot where to place next ship
-	Shoot() (domain.Pair, error) // ask bot where to shoot
-	SetResult(my_types.ShotResult) error // notify bot about shot result
+	Shoot() (domain.Pair, error)           // ask bot where to shoot
+	SetResult(my_types.ShotResult) error   // notify bot about shot result
+	GameOver(bool) error
 }
 
 // forwards game calls to the proxy server
 type BotProxy struct {
-	field   *domain.Field  // user's field, sent with place requests
-    baseURL string         // proxy URL
-    botName string         // bot identifier
-    token   string         // JWT token for proxy authentication
+	field   *domain.Field // user's field, sent with place requests
+	baseURL string        // proxy URL
+	botName string        // bot identifier
+	token   string        // JWT token for proxy authentication
+	userKey string
 	logger  *slog.Logger
 	client  *http.Client
 }
@@ -37,14 +40,15 @@ type ProxyRequest struct {
 }
 
 func NewBotProxy(field *domain.Field, url string, botName string, logger *slog.Logger, token string) *BotProxy {
-	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger, token: token}
+	userKey := fmt.Sprintf("%s-%d", botName, time.Now().UnixNano())
+	return &BotProxy{field: field, baseURL: url, botName: botName, client: &http.Client{}, logger: logger, token: token, userKey: userKey}
 }
 
 func (bp *BotProxy) StartGame() error {
 	body, _ := json.Marshal(ProxyRequest{
-		Name:   bp.botName,
-		Action: "start_game",
-		UserKey: "userkey",
+		Name:    bp.botName,
+		Action:  "start_game",
+		UserKey: bp.userKey,
 	})
 	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
@@ -61,9 +65,9 @@ func (bp *BotProxy) StartGame() error {
 
 func (bp *BotProxy) Shoot() (domain.Pair, error) {
 	body, _ := json.Marshal(ProxyRequest{
-		Name:   bp.botName,
-		Action: "shoot",
-		UserKey: "userkey",
+		Name:    bp.botName,
+		Action:  "shoot",
+		UserKey: bp.userKey,
 	})
 	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
@@ -115,18 +119,18 @@ func (bp *BotProxy) Place() (int, int, domain.Pair, error) {
 
 func (bp *BotProxy) SetResult(result my_types.ShotResult) error {
 	type SetResultRequest struct {
-        Name     string              `json:"name"`
-        Result   my_types.ShotResult `json:"result"`
-        Action   string              `json:"action"`
-        UserKey  string              `json:"user_key"`
-        LastShot domain.Pair         `json:"last_shot"`
-    }
-    body, _ := json.Marshal(SetResultRequest{
-        Name:     bp.botName,
-        Result:   result,
-        Action:   "set_result",
-        UserKey:  "userkey",
-    })
+		Name     string              `json:"name"`
+		Result   my_types.ShotResult `json:"result"`
+		Action   string              `json:"action"`
+		UserKey  string              `json:"user_key"`
+		LastShot domain.Pair         `json:"last_shot"`
+	}
+	body, _ := json.Marshal(SetResultRequest{
+		Name:    bp.botName,
+		Result:  result,
+		Action:  "set_result",
+		UserKey: bp.userKey,
+	})
 	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
 	if err != nil {
@@ -139,5 +143,35 @@ func (bp *BotProxy) SetResult(result my_types.ShotResult) error {
 		return fmt.Errorf("set_result: bot unavailable: %w\n", err)
 	}
 	defer resp.Body.Close()
+	return nil
+}
+
+func (bp *BotProxy) GameOver(user_win bool) error {
+	type GameOverRequest struct {
+		Name    string `json:"name"`
+		Action  string `json:"action"`
+		UserWin bool   `json:"user_win"`
+		UserKey string `json:"user_key"`
+		Player  string `json:"player"`
+	}
+	body, _ := json.Marshal(GameOverRequest{
+		Name:    bp.botName,
+		Action:  "game_over",
+		UserKey: bp.userKey,
+		UserWin: user_win,
+		Player:  "player",
+	})
+	joinURL, _ := url.JoinPath(bp.baseURL, "/game_over")
+	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("game_over: failed to create request: %w\n", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := bp.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("game_over: bot unavailable: %w\n", err)
+	}
+	defer resp.Body.Close()
+
 	return nil
 }

@@ -19,7 +19,10 @@ type SmartBot struct {
 func NewSmartBot(logger *slog.Logger) *SmartBot {
     rep, err := repository.NewRepository(logger)
     if err != nil {
-        logger.Error("failed to initialize repository", "error", err)
+        logger.Error(
+            "smart_bot failed to initialize repository",
+            "error", err,
+        )
         panic("failed to connect to database")
     }
     logger.Info("smart bot initialized successfully")
@@ -92,7 +95,11 @@ func (sb *SmartBot) Shoot(userKey string) (my_types.Pair, error) {
             if err := sb.rep.SetState(ctx, userKey, state); err != nil {
                 return my_types.Pair{}, fmt.Errorf("failed to save state: %w", err)
             }
-            sb.logger.Info("sink shot", "target", next, "memory_left", state.Memory)
+            sb.logger.Info(
+                "sink shot",
+                "target", next,
+                "memory_left", state.Memory,
+            )
             return next, nil
         }
         
@@ -109,7 +116,10 @@ func (sb *SmartBot) Shoot(userKey string) (my_types.Pair, error) {
     if err := sb.rep.SetState(ctx, userKey, state); err != nil {
         return my_types.Pair{}, fmt.Errorf("failed to save state: %w", err)
     }
-    sb.logger.Info("random shot", "target", target)
+    sb.logger.Info(
+        "random shot",
+        "target", target,
+    )
     return target, nil
 }
 
@@ -119,13 +129,19 @@ func (sb *SmartBot) SetResult(userKey string, shotRes my_types.ShotResult) {
     if shotRes == my_types.Already {
         state, err := sb.rep.GetState(ctx, userKey)
          if err != nil {
-            sb.logger.Error("failed to get state for Already", "error", err)
+            sb.logger.Error(
+                "failed to get state for Already",
+                "error", err,
+            )
             return
         }
         if len(state.Memory) > 0 {
             state.Memory = state.Memory[1:]
             if err := sb.rep.SetState(ctx, userKey, state); err != nil {
-                sb.logger.Error("failed to save state after Already", "error", err)
+                sb.logger.Error(
+                    "failed to save state after Already",
+                    "error", err,
+                )
             }
         }
 

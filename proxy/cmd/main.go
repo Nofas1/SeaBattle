@@ -41,7 +41,10 @@ type Proxy struct {
 func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *Proxy {
 	rep, err := repository.NewRepository(logger)
     if err != nil {
-        logger.Error("proxy: failed to initialize repository", "error", err)
+        logger.Error(
+			"proxy failed to initialize repository",
+			"error", err,
+		)
         panic("failed to connect to database")
     }
     logger.Info("proxy initialized successfully")
@@ -72,21 +75,31 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 		var req ProxyRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			p.logger.Error("failed to decode request", "error", err)
+			p.logger.Error(
+				"failed to decode request",
+				"error", err,
+			)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		botCfg, exists := p.bots[req.Name]
 		if !exists {
-			p.logger.Error("bot not found", "name", req.Name)
+			p.logger.Error(
+				"bot not found",
+				"name", req.Name,
+			)
 			http.Error(w, "bot not found", http.StatusBadRequest)
 			return
 		}
 
 		healthURL, err := url.JoinPath(botCfg.URL, "health")
 		if err != nil {
-			p.logger.Error("failed to build health URL", "bot", req.Name, "error", err)
+			p.logger.Error(
+				"failed to build health URL",
+				"bot", req.Name,
+				"error", err,
+			)
 			http.Error(w, "invalid bot URL", http.StatusInternalServerError)
 			return
 		}
@@ -96,14 +109,21 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 		healthReq, err := http.NewRequestWithContext(healthCtx, http.MethodGet, healthURL, nil)
 		if err != nil {
-			p.logger.Error("failed to create health request", "error", err)
+			p.logger.Error(
+				"failed to create health request",
+				"error", err,
+			)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		healthResp, err := p.client.Do(healthReq)
 		if err != nil {
-			p.logger.Error("bot health check failed", "bot", req.Name, "error", err)
+			p.logger.Error(
+				"bot health check failed",
+				"bot", req.Name,
+				"error", err,
+			)
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
@@ -115,14 +135,20 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			}
 			sgBody, err := json.Marshal(StartGameRequest{UserKey: req.UserKey})
 			if err != nil {
-				p.logger.Error("failed to marshal start_game", "error", err)
+				p.logger.Error(
+					"failed to marshal start_game",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 
 			sgURL, err := url.JoinPath(botCfg.URL, "start")
 			if err != nil {
-				p.logger.Error("failed to build start_game URL", "error", err)
+				p.logger.Error(
+					"failed to build start_game URL",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -132,7 +158,10 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 			sgReq, err := http.NewRequestWithContext(sgCtx, http.MethodPost, sgURL, bytes.NewReader(sgBody))
 			if err != nil {
-				p.logger.Error("failed to create start_game request", "error", err)
+				p.logger.Error(
+					"failed to create start_game request",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -140,7 +169,11 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 			sgResp, err := p.client.Do(sgReq)
 			if err != nil {
-				p.logger.Error("start_game call failed", "bot", req.Name, "error", err)
+				p.logger.Error(
+					"start_game call failed",
+					"bot", req.Name,
+					"error", err,
+				)
 			} else {
 				sgResp.Body.Close()
 			}
@@ -157,14 +190,20 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 			srBody, err := json.Marshal(SetResultRequest{Result: req.Result, UserKey: req.UserKey})
 			if err != nil {
-				p.logger.Error("failed to marshal set_result", "error", err)
+				p.logger.Error(
+					"failed to marshal set_result",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 
 			srURL, err := url.JoinPath(botCfg.URL, "set_result")
 			if err != nil {
-				p.logger.Error("failed to build set_result URL", "error", err)
+				p.logger.Error(
+					"failed to build set_result URL",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -174,7 +213,10 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 			srReq, err := http.NewRequestWithContext(srCtx, http.MethodPost, srURL, bytes.NewReader(srBody))
 			if err != nil {
-				p.logger.Error("failed to create set_result request", "error", err)
+				p.logger.Error(
+					"failed to create set_result request",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -182,7 +224,11 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 			srResp, err := p.client.Do(srReq)
 			if err != nil {
-				p.logger.Error("set_result call failed", "bot", req.Name, "error", err)
+				p.logger.Error(
+					"set_result call failed",
+					"bot", req.Name,
+					"error", err,
+				)
 			} else {
 				srResp.Body.Close()
 			}
@@ -198,14 +244,20 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 			goBody, err := json.Marshal(GameOverRequest{UserKey: req.UserKey})
 			if err != nil {
-				p.logger.Error("failed to marshal game_over", "error", err)
+				p.logger.Error(
+					"failed to marshal game_over",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 
 			goURL, err := url.JoinPath(botCfg.URL, "game_over")
 			if err != nil {
-				p.logger.Error("failed to build game_over URL", "error", err)
+				p.logger.Error(
+					"failed to build game_over URL",
+					"error", err,
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -224,7 +276,11 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 
 			goResp, err := p.client.Do(goReq)
 			if err != nil {
-				p.logger.Error("game_over call failed", "bot", req.Name, "error", err)
+				p.logger.Error(
+					"game_over call failed",
+					"bot", req.Name, 
+					"error", err,
+				)
 			} else {
 				goResp.Body.Close()
 			}

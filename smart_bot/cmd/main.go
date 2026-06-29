@@ -55,7 +55,10 @@ func (h *Handler) StartGameHandler() http.HandlerFunc {
 			return
 		}
 
-		h.logger.Info("game started", "user_key", req.UserKey)
+		h.logger.Info(
+			"game started",
+			"user_key", req.UserKey,
+		)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -78,7 +81,10 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 			return
 		}
 
-		h.logger.Info("shoot request received", "user_key", req.UserKey)
+		h.logger.Info(
+			"shoot request received",
+			"user_key", req.UserKey,
+		)
 
 		shot, err := h.bot.Shoot(req.UserKey)
 		if err != nil {

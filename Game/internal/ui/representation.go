@@ -274,6 +274,93 @@ func DrawGrid(offsetX, offsetY int32, matrix [][]int, hideShips bool) {
 	}
 }
 
+func GameOver(winner string, music rl.Music) bool {
+    playAgainBtn := rl.Rectangle{
+        X:      float32(WIDTH/2 - 150),
+        Y:      float32(HEIGHT/2 + 20),
+        Width:  140,
+        Height: 50,
+    }
+    quitBtn := rl.Rectangle{
+        X:      float32(WIDTH/2 + 10),
+        Y:      float32(HEIGHT/2 + 20),
+        Width:  140,
+        Height: 50,
+    }
+
+    for !rl.WindowShouldClose() {
+        rl.UpdateMusicStream(music)
+
+        mp := rl.GetMousePosition()
+        clicked := rl.IsMouseButtonPressed(rl.MouseButtonLeft)
+
+        rl.BeginDrawing()
+        rl.ClearBackground(rl.RayWhite)
+
+        // title
+        title := "YOU WIN!"
+        titleColor := rl.DarkGreen
+        if winner == "bot" {
+            title = "YOU LOSE!"
+            titleColor = rl.Red
+        }
+        titleW := rl.MeasureText(title, 60)
+        rl.DrawText(title, int32(WIDTH/2)-titleW/2, int32(HEIGHT/2)-100, 60, titleColor)
+
+        // subtitle
+        sub := "Better luck next time."
+        if winner == "user" {
+            sub = "Congratulations!"
+        }
+        subW := rl.MeasureText(sub, 24)
+        rl.DrawText(sub, int32(WIDTH/2)-subW/2, int32(HEIGHT/2)-30, 24, rl.Gray)
+
+        // play again button
+        playHovered := rl.CheckCollisionPointRec(mp, playAgainBtn)
+        playColor := rl.SkyBlue
+        if playHovered {
+            playColor = rl.Blue
+        }
+        rl.DrawRectangleRec(playAgainBtn, playColor)
+        rl.DrawRectangleLinesEx(playAgainBtn, 2, rl.DarkBlue)
+        paW := rl.MeasureText("Play Again", 20)
+        rl.DrawText("Play Again",
+            int32(playAgainBtn.X)+int32(playAgainBtn.Width)/2-paW/2,
+            int32(playAgainBtn.Y)+15,
+            20, rl.White,
+        )
+
+        // quit button
+        quitHovered := rl.CheckCollisionPointRec(mp, quitBtn)
+        quitColor := rl.LightGray
+        if quitHovered {
+            quitColor = rl.Gray
+        }
+        rl.DrawRectangleRec(quitBtn, quitColor)
+        rl.DrawRectangleLinesEx(quitBtn, 2, rl.DarkGray)
+        qW := rl.MeasureText("Quit", 20)
+        rl.DrawText("Quit",
+            int32(quitBtn.X)+int32(quitBtn.Width)/2-qW/2,
+            int32(quitBtn.Y)+15,
+            20, rl.DarkGray,
+        )
+
+        if clicked {
+            if playHovered {
+                rl.EndDrawing()
+                return true  // play again
+            }
+            if quitHovered {
+                rl.EndDrawing()
+                return false // quit
+            }
+        }
+
+        rl.EndDrawing()
+    }
+    return false
+}
+
 func Placer(userField *domain.Field, cancel <-chan struct{}, music rl.Music) {
 	ship_index := 0
 	dir := my_types.Up
@@ -332,7 +419,7 @@ func Placer(userField *domain.Field, cancel <-chan struct{}, music rl.Music) {
 	}
 }
 
-func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, logger *slog.Logger) {
+func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, logger *slog.Logger) string {
 	user_sunk := 0
 	bot_sunk := 0
 	turn := true
@@ -350,11 +437,13 @@ func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, log
 
 		if user_sunk == 10 {
 			_ = bot.GameOver(true)
-			break
+			rl.EndDrawing()
+            return "bot"
 		}
 		if bot_sunk == 10 {
 			_ = bot.GameOver(false)
-			break
+			rl.EndDrawing()
+            return "user"
 		}
 
 		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) && turn == true {
@@ -399,9 +488,10 @@ func Battle(userField, botField *domain.Field, bot game.Bot, music rl.Music, log
 
 		rl.EndDrawing()
 	}
+	return ""
 }
 
-func Run(userField, botField *domain.Field) {
+func Run() {
 	rl.InitWindow(HEIGHT, WIDTH, "Sea Battle")
 	defer rl.CloseWindow()
 
@@ -421,8 +511,31 @@ func Run(userField, botField *domain.Field) {
 	// 	return
 	// }
 	token := "s10f9"
-	bot := SelectBot(userField, music, logger, token)
-	_ = bot.StartGame()
-	Placer(userField, cancel, music)
-	Battle(userField, botField, bot, music, logger)
+	for !rl.WindowShouldClose() {
+        botField := domain.Constructor()
+        userField := domain.Constructor()
+
+        botCancel := make(chan struct{})
+        go botField.BuildField(domain.RandomPlacer, botCancel)
+
+        bot := SelectBot(userField, music, logger, token)
+        if err := bot.StartGame(); err != nil {
+            logger.Error("failed to start game", "error", err)
+        }
+
+        userCancel := make(chan struct{})
+        Placer(userField, userCancel, music)
+        close(userCancel)
+        close(botCancel)
+
+        winner := Battle(userField, botField, bot, music, logger)
+        if winner == "" {
+            break
+        }
+
+        playAgain := GameOver(winner, music)
+        if !playAgain {
+            break
+        }
+    }
 }

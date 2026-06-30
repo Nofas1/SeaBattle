@@ -1,15 +1,17 @@
 package ui
 
 import (
-	// "bytes"
-	// "encoding/json"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
-	// "net/http"
+	"net/http"
 	"os"
 	"sea_battle/Game/internal/domain"
 	"sea_battle/Game/internal/game"
 	"sea_battle/my_types"
-	// "strings"
+	"strings"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -48,117 +50,140 @@ const (
 	BoxPassword
 )
 
-// func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
-// 	username := ""
-// 	password := ""
-// 	activeBox := BoxNone
-// 	loginError := ""
+func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
+	username := ""
+	password := ""
+	activeBox := BoxNone
+	loginError := ""
 
-// 	for !rl.WindowShouldClose() {
-// 		rl.UpdateMusicStream(music)
+	for !rl.WindowShouldClose() {
+		rl.UpdateMusicStream(music)
 
-// 		key := rl.GetCharPressed()
-// 		for key > 0 {
-// 			if activeBox == BoxUsername {
-// 				username += string(rune(key))
-// 			}
-// 			if activeBox == BoxPassword {
-// 				password += string(rune(key))
-// 			}
-// 			key = rl.GetCharPressed()
-// 		}
+		key := rl.GetCharPressed()
+		for key > 0 {
+			if activeBox == BoxUsername {
+				username += string(rune(key))
+			}
+			if activeBox == BoxPassword {
+				password += string(rune(key))
+			}
+			key = rl.GetCharPressed()
+		}
 
-// 		if rl.IsKeyPressed(rl.KeyBackspace) {
-// 			if activeBox == BoxUsername && len(username) > 0 {
-// 				username = username[:len(username)-1]
-// 			}
-// 			if activeBox == BoxPassword && len(password) > 0 {
-// 				password = password[:len(password)-1]
-// 			}
-// 		}
+		if rl.IsKeyPressed(rl.KeyBackspace) {
+			if activeBox == BoxUsername && len(username) > 0 {
+				username = username[:len(username)-1]
+			}
+			if activeBox == BoxPassword && len(password) > 0 {
+				password = password[:len(password)-1]
+			}
+		}
 
-// 		mouse := rl.GetMousePosition()
+		mouse := rl.GetMousePosition()
 
-// 		userRect := rl.Rectangle{X: 250, Y: 180, Width: 300, Height: 40}
-// 		passRect := rl.Rectangle{X: 250, Y: 260, Width: 300, Height: 40}
-// 		loginBtn := rl.Rectangle{X: 300, Y: 340, Width: 200, Height: 50}
-// 		registerBtn := rl.Rectangle{X: 300, Y: 410, Width: 200, Height: 50}
+		userRect := rl.Rectangle{X: 250, Y: 180, Width: 300, Height: 40}
+		passRect := rl.Rectangle{X: 250, Y: 260, Width: 300, Height: 40}
+		loginBtn := rl.Rectangle{X: 300, Y: 340, Width: 200, Height: 50}
+		registerBtn := rl.Rectangle{X: 300, Y: 410, Width: 200, Height: 50}
 
-// 		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-// 			switch {
-// 			case rl.CheckCollisionPointRec(mouse, userRect):
-// 				activeBox = BoxUsername
-// 			case rl.CheckCollisionPointRec(mouse, passRect):
-// 				activeBox = BoxPassword
-// 			case rl.CheckCollisionPointRec(mouse, loginBtn):
-// 				token, err := authRequest("http://localhost:28080/login", username, password)
-// 				if err != nil {
-// 					logger.Error("login failed", "error", err)
-// 					loginError = err.Error()
-// 				} else {
-// 					return token
-// 				}
-// 			case rl.CheckCollisionPointRec(mouse, registerBtn):
-// 				_, err := authRequest("http://localhost:28080/register", username, password)
-// 				if err != nil {
-// 					logger.Error("register failed", "error", err)
-// 					loginError = err.Error()
-// 				} else {
-// 					loginError = "registered, please login"
-// 				}
-// 			}
-// 		}
+		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+			switch {
+			case rl.CheckCollisionPointRec(mouse, userRect):
+				activeBox = BoxUsername
+			case rl.CheckCollisionPointRec(mouse, passRect):
+				activeBox = BoxPassword
+			case rl.CheckCollisionPointRec(mouse, loginBtn):
+				token, err := authRequest("http://localhost:28080/login", username, password)
+				if err != nil {
+					logger.Error(
+						"login failed",
+						"error", err,
+					)
+					loginError = err.Error()
+				} else {
+					return token
+				}
+			case rl.CheckCollisionPointRec(mouse, registerBtn):
+				_, err := authRequest("http://localhost:28080/register", username, password)
+				if err != nil {
+					logger.Error(
+						"register failed",
+						"error", err,
+					)
+					loginError = err.Error()
+				} else {
+					loginError = "registered, please login"
+				}
+			}
+		}
 
-// 		rl.BeginDrawing()
-// 		rl.ClearBackground(rl.RayWhite)
+		rl.BeginDrawing()
+		rl.ClearBackground(rl.RayWhite)
 
-// 		rl.DrawText("LOGIN", 320, 100, 40, rl.DarkBlue)
+		rl.DrawText("LOGIN", 320, 100, 40, rl.DarkBlue)
 
-// 		rl.DrawRectangleRec(userRect, rl.LightGray)
-// 		rl.DrawRectangleLinesEx(userRect, 2, rl.DarkBlue)
-// 		rl.DrawText(username, int32(userRect.X)+10, int32(userRect.Y)+10, 20, rl.Black)
+		rl.DrawRectangleRec(userRect, rl.LightGray)
+		rl.DrawRectangleLinesEx(userRect, 2, rl.DarkBlue)
+		rl.DrawText(username, int32(userRect.X)+10, int32(userRect.Y)+10, 20, rl.Black)
 
-// 		rl.DrawRectangleRec(passRect, rl.LightGray)
-// 		rl.DrawRectangleLinesEx(passRect, 2, rl.DarkBlue)
-// 		stars := strings.Repeat("*", len(password))
-// 		rl.DrawText(stars, int32(passRect.X)+10, int32(passRect.Y)+10, 20, rl.Black)
+		rl.DrawRectangleRec(passRect, rl.LightGray)
+		rl.DrawRectangleLinesEx(passRect, 2, rl.DarkBlue)
+		stars := strings.Repeat("*", len(password))
+		rl.DrawText(stars, int32(passRect.X)+10, int32(passRect.Y)+10, 20, rl.Black)
 
-// 		rl.DrawRectangleRec(loginBtn, rl.SkyBlue)
-// 		rl.DrawText("LOGIN", int32(loginBtn.X)+55, int32(loginBtn.Y)+15, 20, rl.White)
+		rl.DrawRectangleRec(loginBtn, rl.SkyBlue)
+		rl.DrawText("LOGIN", int32(loginBtn.X)+55, int32(loginBtn.Y)+15, 20, rl.White)
 
-// 		rl.DrawRectangleRec(registerBtn, rl.Green)
-// 		rl.DrawText("REGISTER", int32(registerBtn.X)+35, int32(registerBtn.Y)+15, 20, rl.White)
+		rl.DrawRectangleRec(registerBtn, rl.Green)
+		rl.DrawText("REGISTER", int32(registerBtn.X)+35, int32(registerBtn.Y)+15, 20, rl.White)
 
-// 		if loginError != "" {
-// 			rl.DrawText(loginError, 250, 480, 20, rl.Red)
-// 		}
+		if loginError != "" {
+			rl.DrawText(loginError, 250, 480, 20, rl.Red)
+		}
 
-// 		rl.EndDrawing()
-// 	}
+		rl.EndDrawing()
+	}
 
-// 	return ""
-// }
+	return ""
+}
 
-// func authRequest(url, username, password string) (string, error) {
-// 	body, err := json.Marshal(map[string]string{
-// 		"name":     username,
-// 		"password": password,
-// 	})
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	defer resp.Body.Close()
+func authRequest(url, username, password string) (string, error) {
+	body, err := json.Marshal(map[string]string{
+		"name":     username,
+		"password": password,
+	})
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
 
-// 	var authResp AuthResponse
-// 	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
-// 		return "", err
-// 	}
-// 	return authResp.Token, nil
-// }
+	respBody, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return "", fmt.Errorf("failed to read response: %w", err)
+    }
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+        return "", fmt.Errorf("%s", strings.TrimSpace(string(respBody)))
+    }
+
+	var authResp AuthResponse
+    if err := json.Unmarshal(respBody, &authResp); err != nil {
+        return "", fmt.Errorf("failed to decode response: %w", err)
+    }
+    if authResp.Token == "" {
+        return "", fmt.Errorf("empty token in response")
+    }
+
+	// var authResp AuthResponse
+	// if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+	// 	return "", err
+	// }
+	return authResp.Token, nil
+}
 
 func SelectBot(userField *domain.Field, music rl.Music, logger *slog.Logger, token string) game.Bot {
 	buttons := []struct {
@@ -506,11 +531,11 @@ func Run() {
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	// token := DrawAuthWindow(music, logger)
-	// if token == "" {
-	// 	return
-	// }
-	token := "s10f9"
+	token := DrawAuthWindow(music, logger)
+	if token == "" {
+		return
+	}
+	// token := "s10f9"
 	for !rl.WindowShouldClose() {
         botField := domain.Constructor()
         userField := domain.Constructor()

@@ -172,7 +172,7 @@ func (rep *Repo) GetState(ctx context.Context, user_key string) (BotState, error
 		dir = &my_types.Pair{X: dirX, Y: dirY}
 	}
 
-	memory_query := `SELECT coord_x, coord_y FROM memory WHERE states_id = $1`
+	memory_query := `SELECT coord_x, coord_y FROM memory WHERE states_id = $1 ORDER BY memory_id`
 	rows, err := rep.pool.Query(ctx, memory_query, statesID)
 	if err != nil {
 		return BotState{}, fmt.Errorf("failed to get memory: %w", err)

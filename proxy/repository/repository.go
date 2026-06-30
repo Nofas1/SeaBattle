@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Repo struct {
@@ -114,3 +115,34 @@ func (rep *Repo) GetResult(ctx context.Context, name string) (Stats, error) {
 		Loses: loses,
 	}, nil
 }
+
+// RegisterUser inserts a new user with an already-hashed password
+func (rep *Repo) RegisterUser(ctx context.Context, name, hashedPassword string) error {
+	query := `INSERT INTO users (name, password) VALUES ($1, $2)`
+    _, err := rep.pool.Exec(ctx, query, name, hashedPassword)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("user already exists")
+		}
+		return fmt.Errorf("failed to register user: %w", err)
+	}
+	
+	return nil
+}
+
+// GetPasswordHash returns the stored bcrypt hash for a user
+func (rep *Repo) GetPasswordHash(ctx context.Context, name string) (string, error) {
+	query := `SELECT password FROM users WHERE name = $1`
+    var hashed string
+    err := rep.pool.QueryRow(ctx, query, name).Scan(&hashed)
+    if err != nil {
+        if errors.Is(err, pgx.ErrNoRows) {
+            return "", fmt.Errorf("user not found")
+        }
+        return "", fmt.Errorf("failed to get password hash: %w", err)
+    }
+    return hashed, nil
+}
+
+

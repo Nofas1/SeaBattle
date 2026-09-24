@@ -1,67 +1,89 @@
 package mw
 
 import (
-	"errors"
-	"sea_battle/proxy/repository"
+    "context"
+    "errors"
+    "fmt"
+    "log/slog"
+    "os"
+    "sea_battle/proxy/repository"
+    "time"
 
-	"fmt"
-	"log/slog"
-	"context"
-	"time"
-
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
+    "github.com/golang-jwt/jwt/v5"
+    "github.com/google/uuid"
+    "golang.org/x/crypto/bcrypt"
 )
 
-const secretKey = "LBv2{zlze*v8(|?f6j[+{@9|(>h/98s#X)DrkWsT{dT" // token sign key
-const adminRole = "superuser"             // token subject
+const jwtSecretEnv = "JWT_SECRET"     // env var with the token signing key
+const defaultTokenTTL = time.Hour     // used when a non-positive TTL is passed to New
+const issuerName = "sea_battle-proxy" // "iss" claim value
 
 // Authentication, Authorization, Accounting
 type AAA struct {
-	rep *repository.Repo
-	users    map[string]string
-	tokenTTL time.Duration
-	log      *slog.Logger
+    rep      *repository.Repo
+    secret   []byte
+    tokenTTL time.Duration
+    log      *slog.Logger
 }
 
+// New builds the auth service. The signing key is taken from the JWT_SECRET
+// environment variable; it must be present and long enough (>= 32 bytes),
+// so tokens cannot be forged with a hardcoded key.
 func New(tokenTTL time.Duration, log *slog.Logger, rep *repository.Repo) (AAA, error) {
-	// const adminUser = "ADMIN_USER"
-	// const adminPass = "ADMIN_PASSWORD"
-	// user, ok := os.LookupEnv(adminUser)
-	// if !ok {
-	// 	return AAA{}, fmt.Errorf("could not get admin user from enviroment")
-	// }
-	// password, ok := os.LookupEnv(adminPass)
-	// if !ok {
-	// 	return AAA{}, fmt.Errorf("could not get admin password from enviroment")
-	// }
+    secret := os.Getenv(jwtSecretEnv)
+    if secret == "" {
+        return AAA{}, fmt.Errorf("%s environment variable is not set", jwtSecretEnv)
+    }
+    if len(secret) < 32 {
+        return AAA{}, fmt.Errorf("%s must be at least 32 bytes long", jwtSecretEnv)
+    }
+    if tokenTTL <= 0 {
+        tokenTTL = defaultTokenTTL
+    }
 
-	return AAA{
-		rep: rep,
-		users:    map[string]string{},
-		tokenTTL: tokenTTL,
-		log:      log,
-	}, nil
+    return AAA{
+        rep:      rep,
+        secret:   []byte(secret),
+        tokenTTL: tokenTTL,
+        log:      log,
+    }, nil
 }
 
 func (a *AAA) Register(name, password string) error {
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+    hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
     if err != nil {
         return fmt.Errorf("failed to hash password: %w", err)
     }
-	if err := a.rep.RegisterUser(context.Background(), name, string(hashed)); err != nil {
+    if err := a.rep.RegisterUser(context.Background(), name, string(hashed)); err != nil {
         return fmt.Errorf("failed to register user: %w", err)
     }
-	// if _, exists := a.users[name]; !exists {
-	// 	a.users[name] = password
-	// } else {
-	// 	return errors.New("User already exists")
-	// }
-	return nil
+    // if _, exists := a.users[name]; !exists {
+    //     a.users[name] = password
+    // } else {
+    //     return errors.New("User already exists")
+    // }
+    return nil
+}
+
+// issueToken creates a signed JWT for the given user.
+func (a *AAA) issueToken(name string) (string, error) {
+    now := time.Now()
+    token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+        Issuer:    issuerName,
+        Subject:   name,
+        ID:        uuid.NewString(), // jti — unique token id
+        IssuedAt:  jwt.NewNumericDate(now),
+        NotBefore: jwt.NewNumericDate(now),
+        ExpiresAt: jwt.NewNumericDate(now.Add(a.tokenTTL)),
+    }).SignedString(a.secret)
+    if err != nil {
+        return "", fmt.Errorf("failed to sign token: %w", err)
+    }
+    return token, nil
 }
 
 func (a *AAA) Login(name, password string) (string, error) {
-	hashed, err := a.rep.GetPasswordHash(context.Background(), name)
+    hashed, err := a.rep.GetPasswordHash(context.Background(), name)
     if err != nil {
         return "", errors.New("invalid credentials")
     }
@@ -69,42 +91,33 @@ func (a *AAA) Login(name, password string) (string, error) {
         return "", errors.New("invalid credentials")
     }
 
-    jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-        Subject:   name,
-        ExpiresAt: jwt.NewNumericDate(time.Now().Add(a.tokenTTL)),
-    })
-    token, err := jwtToken.SignedString([]byte(secretKey))
-    if err != nil {
-        return "", fmt.Errorf("failed to sign token: %w", err)
-    }
-    return token, nil
-	// if a.users[name] != password {
-	// 	return "", errors.New("Authorization error")
-	// }
-	// jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-	// 	Subject: name,
-	// 	ExpiresAt: jwt.NewNumericDate(time.Now().Add(a.tokenTTL)),
-	// })
-
-	// token, err := jwtToken.SignedString([]byte(secretKey))
-	// if err != nil {
-	// 	return "", errors.New("Failed to sign token")
-	// }
-
-	// return token, nil
+    return a.issueToken(name)
 }
 
+// Verify checks the token signature and standard claims (exp, nbf, iss)
+// and returns the subject (user name) of a valid token.
 func (a *AAA) Verify(tokenString string) (string, error) {
-	claims := jwt.RegisteredClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, &claims, func(t *jwt.Token) (any, error) {
-		return []byte(secretKey), nil
-	})
-	if err != nil {
-		return "", errors.New("Failed to parse token")
-	}
-
-	if !token.Valid {
-		return "", errors.New("Token expired")
-	}
-	return claims.Subject, nil
+    claims := jwt.RegisteredClaims{}
+    _, err := jwt.ParseWithClaims(tokenString, &claims, func(t *jwt.Token) (any, error) {
+        // reject tokens signed with any other algorithm (e.g. "none")
+        if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+            return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+        }
+        return a.secret, nil
+    },
+        jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+        jwt.WithIssuer(issuerName),
+        jwt.WithExpirationRequired(),
+        jwt.WithTimeFunc(time.Now),
+    )
+    if err != nil {
+        if errors.Is(err, jwt.ErrTokenExpired) {
+            return "", errors.New("token expired")
+        }
+        return "", fmt.Errorf("invalid token: %w", err)
+    }
+    if claims.Subject == "" {
+        return "", errors.New("token has no subject")
+    }
+    return claims.Subject, nil
 }

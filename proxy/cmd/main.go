@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"errors"
 
-	"io"
+	// "io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -384,17 +385,19 @@ func LoginHandler(auth mw.AAA) http.HandlerFunc {
 func RegisterHandler(auth mw.AAA) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req AuthRequest
-		body, _ := io.ReadAll(r.Body)
-		fmt.Printf("%s", string(body))
-		err := json.Unmarshal(body, &req)
-		// err := json.NewDecoder(body).Decode(&req)
+		// body, _ := io.ReadAll(r.Body)
+		// fmt.Printf("%s", string(body))
+		// err := json.Unmarshal(body, &req)
+		// // err := json.NewDecoder(body).Decode(&req)
 
-		if err != nil {
+		// if err != nil {
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		err = auth.Register(req.Name, req.Password)
+		err := auth.Register(req.Name, req.Password)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -404,21 +407,58 @@ func RegisterHandler(auth mw.AAA) http.HandlerFunc {
 	}
 }
 
-func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
+func VerifyHandler(auth mw.AAA) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, "Authorization header required", http.StatusUnauthorized)
+		tokenString, err := bearerToken(authHeader)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
 
-		bearer_token := strings.Split(authHeader, " ")
-		if strings.ToLower(bearer_token[0]) != "bearer" || len(bearer_token) != 2 {
-			http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+		name, err := auth.Verify(tokenString)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
 
-		tokenString := bearer_token[1]
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"user": name})
+	}
+}
+
+// bearerToken extracts the token from an "Authorization: Bearer <token>" header.
+func bearerToken(authHeader string) (string, error) {
+	if authHeader == "" {
+			return "", errors.New("authorization header required")
+	}
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			return "", errors.New("invalid authorization format")
+	}
+	return parts[1], nil
+}
+
+func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tokenString, err := bearerToken(r.Header.Get("Authorization"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		// authHeader := r.Header.Get("Authorization")
+		// if authHeader == "" {
+		// 	http.Error(w, "Authorization header required", http.StatusUnauthorized)
+		// 	return
+		// }
+
+		// bearer_token := strings.Split(authHeader, " ")
+		// if strings.ToLower(bearer_token[0]) != "bearer" || len(bearer_token) != 2 {
+		// 	http.Error(w, "Invalid authorization format", http.StatusUnauthorized)
+		// 	return
+		// }
+
+		// tokenString := bearer_token[1]
 
 		if _, err := auth.Verify(tokenString); err != nil {
 			p.logger.Error(
@@ -454,6 +494,7 @@ func main() {
 
 	http.HandleFunc("/login", LoginHandler(authService))
 	http.HandleFunc("/register", RegisterHandler(authService))
+	http.HandleFunc("/verify", VerifyHandler(authService))
 	http.Handle("/bot", proxy.AuthHandler(authService, http.HandlerFunc(proxy.ProxyHandler())))
 
 	logger.Info("Listening on", "Adr", cfg.Proxy.Address, "Port", cfg.Proxy.Port)

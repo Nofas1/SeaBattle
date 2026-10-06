@@ -90,6 +90,13 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 	}
 }
 
+func (h *Handler) HealthHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}
+}
+
 func main() {
 	var cfg_path string
 	var logLevel string
@@ -123,6 +130,7 @@ func main() {
 	http.HandleFunc("/shoot", h.ShootHandler())
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())
+	http.HandleFunc("/health", h.HealthHandler())
 
 	logger.Info("Listening on", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)
 	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.BotCfg.Address, cfg.BotCfg.Port), nil)

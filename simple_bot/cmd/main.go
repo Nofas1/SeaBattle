@@ -34,11 +34,11 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 		err := json.NewDecoder(r.Body).Decode(&field)
 		if err != nil {
 			h.logger.Error(
-				"failed to decode field", 
+				"failed to decode field",
 				"source", "simple_bot",
 				"error", err,
 			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -57,10 +57,10 @@ func (h *Handler) SetResultHandler() http.HandlerFunc {
 		if err != nil {
 			h.logger.Error(
 				"failed to decode shot result",
-				"source", "simple_bot", 
+				"source", "simple_bot",
 				"error", err,
 			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		h.bot.SetResult(res)

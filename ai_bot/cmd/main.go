@@ -2,24 +2,24 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"flag"
-	"fmt"
+	"sea_battle/ai_bot/config"
 	"sea_battle/ai_bot/internal"
 	"sea_battle/my_types"
-	"sea_battle/ai_bot/config"
 )
 
-type Bot interface{
+type Bot interface {
 	Place() (int, int, my_types.Pair)
 	Shoot(*my_types.Field) my_types.Pair
 	SetResult(my_types.ShotResult)
 }
 
 type Handler struct {
-	bot Bot
+	bot    Bot
 	logger *slog.Logger
 }
 
@@ -38,7 +38,7 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 				"source", "ai_bot",
 				"error", err,
 			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -60,7 +60,7 @@ func (h *Handler) SetResultHandler() http.HandlerFunc {
 				"source", "ai_bot",
 				"error", err,
 			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		h.bot.SetResult(res)

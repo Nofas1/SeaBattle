@@ -1,7 +1,9 @@
 package domain
 
 import (
-	"sea_battle/my_types"	
+	"fmt"
+
+	"sea_battle/my_types"
 )
 
 func Constructor() *Field {
@@ -61,6 +63,10 @@ func (f *Field) Validation(point Pair) bool {
 }
 
 func (f *Field) PlaceShip(ship, dir int, point Pair) bool {
+	if ship <= 0 || ship > my_types.Size || dir < 0 || dir >= len(my_types.Directions) {
+		return false
+	}
+
 	var cells []Pair
 	myDir := my_types.Directions[dir]
 
@@ -87,7 +93,7 @@ func (f *Field) BuildField(placer PlacerFunc, cancel <-chan struct{}) error {
 		select {
 		case req, ok := <-requests:
 			if !ok {
-				return nil
+				return fmt.Errorf("placer stopped after %d of %d ships", cnt, len(my_types.ShipSizes))
 			}
 			if f.PlaceShip(req.ShipSize, req.Dir, req.Point) {
 				req.Feedback <- true
@@ -146,3 +152,7 @@ func (f *Field) IsSunk(row, col int) bool {
 
 	return true
 }
+
+// func Summing(a, b int) int {
+// 	return a + b
+// }

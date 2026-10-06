@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"errors"
 
 	// "io"
 	"log/slog"
@@ -33,24 +33,34 @@ type AuthResponse struct {
 
 type Proxy struct {
 	client *http.Client
-	rep *repository.Repo
+	rep    proxyRepository
 	bots   map[string]config.BotConfig
 	logger *slog.Logger
 }
 
+type matchRepository interface {
+	SetResult(context.Context, string, bool) error
+}
+
+type proxyRepository interface {
+	matchRepository
+	RegisterUser(context.Context, string, string) error
+	GetPasswordHash(context.Context, string) (string, error)
+}
+
 func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *Proxy {
 	rep, err := repository.NewRepository(logger)
-    if err != nil {
-        logger.Error(
+	if err != nil {
+		logger.Error(
 			"proxy failed to initialize repository",
 			"error", err,
 		)
-        panic("failed to connect to database")
-    }
-    logger.Info("proxy initialized successfully")
+		panic("failed to connect to database")
+	}
+	logger.Info("proxy initialized successfully")
 	return &Proxy{
 		client: client,
-		rep: rep,
+		rep:    rep,
 		bots:   cfg.Bots,
 		logger: logger,
 	}
@@ -128,6 +138,10 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			return
 		}
 		healthResp.Body.Close()
+		if healthResp.StatusCode < http.StatusOK || healthResp.StatusCode >= http.StatusMultipleChoices {
+			http.Error(w, "bot health check failed: "+healthResp.Status, http.StatusServiceUnavailable)
+			return
+		}
 
 		if req.Action == "start_game" {
 			type StartGameRequest struct {
@@ -174,8 +188,13 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 					"bot", req.Name,
 					"error", err,
 				)
-			} else {
-				sgResp.Body.Close()
+				http.Error(w, "start_game call failed", http.StatusServiceUnavailable)
+				return
+			}
+			sgResp.Body.Close()
+			if sgResp.StatusCode < http.StatusOK || sgResp.StatusCode >= http.StatusMultipleChoices {
+				http.Error(w, "start_game failed: "+sgResp.Status, http.StatusBadGateway)
+				return
 			}
 
 			w.WriteHeader(http.StatusCreated)
@@ -229,8 +248,13 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 					"bot", req.Name,
 					"error", err,
 				)
-			} else {
-				srResp.Body.Close()
+				http.Error(w, "set_result call failed", http.StatusServiceUnavailable)
+				return
+			}
+			srResp.Body.Close()
+			if srResp.StatusCode < http.StatusOK || srResp.StatusCode >= http.StatusMultipleChoices {
+				http.Error(w, "set_result failed: "+srResp.Status, http.StatusBadGateway)
+				return
 			}
 
 			w.WriteHeader(http.StatusOK)
@@ -278,7 +302,7 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			if err != nil {
 				p.logger.Error(
 					"game_over call failed",
-					"bot", req.Name, 
+					"bot", req.Name,
 					"error", err,
 				)
 			} else {
@@ -292,6 +316,8 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 					"user_win", req.UserWin,
 					"error", err,
 				)
+				http.Error(w, "failed to save match result", http.StatusInternalServerError)
+				return
 			} else {
 				p.logger.Info(
 					"match result saved",
@@ -341,6 +367,10 @@ func (p *Proxy) ProxyHandler() http.HandlerFunc {
 			return
 		}
 		defer botResp.Body.Close()
+		if botResp.StatusCode < http.StatusOK || botResp.StatusCode >= http.StatusMultipleChoices {
+			http.Error(w, "bot action failed: "+botResp.Status, http.StatusBadGateway)
+			return
+		}
 
 		var result ProxyResponse
 		if err := json.NewDecoder(botResp.Body).Decode(&result); err != nil {
@@ -429,12 +459,12 @@ func VerifyHandler(auth mw.AAA) http.HandlerFunc {
 
 // bearerToken extracts the token from an "Authorization: Bearer <token>" header.
 func bearerToken(authHeader string) (string, error) {
-	if authHeader == "" {
-			return "", errors.New("authorization header required")
+	parts := strings.Fields(authHeader)
+	if len(parts) == 0 {
+		return "", errors.New("authorization header required")
 	}
-	parts := strings.Split(authHeader, " ")
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return "", errors.New("invalid authorization format")
+		return "", errors.New("invalid authorization format")
 	}
 	return parts[1], nil
 }

@@ -17,7 +17,7 @@ type Bot interface {
 	Place() (int, int, my_types.Pair)      // returns ship placement coordinates and direction
 	Shoot(string) (my_types.Pair, error)   // returns target coordinates for the given user session
 	SetResult(string, my_types.ShotResult) // updates bot state based on shot result
-	StartGame(string) error // initialize fresh bot state
+	StartGame(string) error                // initialize fresh bot state
 	GameOver(string) error
 }
 
@@ -42,7 +42,7 @@ func (h *Handler) StartGameHandler() http.HandlerFunc {
 				"error", err,
 			)
 			http.Error(w, err.Error(), http.StatusBadRequest)
-			return 
+			return
 		}
 
 		if err := h.bot.StartGame(req.UserKey); err != nil {
@@ -77,7 +77,7 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 				"source", "smart_bot",
 				"error", err,
 			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -118,7 +118,7 @@ func (h *Handler) SetResultHandler() http.HandlerFunc {
 				"source", "smart_bot",
 				"error", err,
 			)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		h.bot.SetResult(req.UserKey, req.Result)
@@ -134,7 +134,11 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 		var req struct {
 			Field [][]int `json:"field"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			h.logger.Error("failed to decode place request", "error", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		type PlaceResponse struct {
 			X   int           `json:"x"`
 			Y   int           `json:"y"`
@@ -143,8 +147,8 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 
 		x, y, dir := h.bot.Place()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PlaceResponse{X: x, Y: y, Dir: dir})
 		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(PlaceResponse{X: x, Y: y, Dir: dir})
 	}
 }
 
@@ -154,7 +158,11 @@ func (h *Handler) GameOverHandler() http.HandlerFunc {
 		var req struct {
 			UserKey string `json:"user_key"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			h.logger.Error("failed to decode game over request", "error", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
 		err := h.bot.GameOver(req.UserKey)
 		if err != nil {
@@ -162,11 +170,12 @@ func (h *Handler) GameOverHandler() http.HandlerFunc {
 				"failed to clear state",
 				"error", err,
 			)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}
 }
-
 
 func main() {
 	// config parsing, log level parsing

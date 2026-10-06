@@ -36,6 +36,7 @@ type ProxyRequest struct {
 	Field   [][]int             `json:"field"`
 	Action  string              `json:"action"`
 	Result  my_types.ShotResult `json:"result"`
+	UserWin bool                `json:"user_win,omitempty"`
 	UserKey string              `json:"user_key"` // session identifier for stateful bots
 }
 
@@ -55,11 +56,16 @@ func (bp *BotProxy) StartGame() error {
 	if err != nil {
 		return fmt.Errorf("start_game: failed to create request: %w\n", err)
 	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bp.token)
 	resp, err := bp.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("start_game: bot unavailable: %w\n", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("start_game: proxy returned status %s", resp.Status)
+	}
 	return nil
 }
 
@@ -81,6 +87,9 @@ func (bp *BotProxy) Shoot() (domain.Pair, error) {
 		return domain.Pair{}, fmt.Errorf("shoot: bot unavailable: %w\n", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return domain.Pair{}, fmt.Errorf("shoot: proxy returned status %s", resp.Status)
+	}
 	var pair domain.Pair
 	if err := json.NewDecoder(resp.Body).Decode(&pair); err != nil {
 		return domain.Pair{}, fmt.Errorf("shoot: failed to decode: %w\n", err)
@@ -106,6 +115,9 @@ func (bp *BotProxy) Place() (int, int, domain.Pair, error) {
 		return 0, 0, domain.Pair{}, fmt.Errorf("place: bot unavailable: %w\n", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return 0, 0, domain.Pair{}, fmt.Errorf("place: proxy returned status %s", resp.Status)
+	}
 	var res struct {
 		X   int         `json:"x"`
 		Y   int         `json:"y"`
@@ -143,35 +155,34 @@ func (bp *BotProxy) SetResult(result my_types.ShotResult) error {
 		return fmt.Errorf("set_result: bot unavailable: %w\n", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("set_result: proxy returned status %s", resp.Status)
+	}
 	return nil
 }
 
 func (bp *BotProxy) GameOver(user_win bool) error {
-	type GameOverRequest struct {
-		Name    string `json:"name"`
-		Action  string `json:"action"`
-		UserWin bool   `json:"user_win"`
-		UserKey string `json:"user_key"`
-		Player  string `json:"player"`
-	}
-	body, _ := json.Marshal(GameOverRequest{
+	body, _ := json.Marshal(ProxyRequest{
 		Name:    bp.botName,
 		Action:  "game_over",
 		UserKey: bp.userKey,
 		UserWin: user_win,
-		Player:  "player",
 	})
-	joinURL, _ := url.JoinPath(bp.baseURL, "/game_over")
+	joinURL, _ := url.JoinPath(bp.baseURL, "/bot")
 	req, err := http.NewRequest("POST", joinURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("game_over: failed to create request: %w\n", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+bp.token)
 	resp, err := bp.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("game_over: bot unavailable: %w\n", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("game_over: proxy returned status %s", resp.Status)
+	}
 
 	return nil
 }

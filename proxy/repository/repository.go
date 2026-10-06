@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sea_battle/smart_bot/db"
+	"sea_battle/proxy/db"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jmoiron/sqlx"
 	"github.com/joho/godotenv"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Repo struct {
@@ -21,7 +21,7 @@ type Repo struct {
 }
 
 type Stats struct {
-	Wins int
+	Wins  int
 	Loses int
 }
 
@@ -35,11 +35,11 @@ func NewRepository(logger *slog.Logger) (*Repo, error) {
 	if connString == "" {
 		return nil, fmt.Errorf("DATABASE_URL not set")
 	}
-    conn, err := sqlx.ConnectContext(context.Background(), "pgx", connString)
-    if err != nil {
-        return nil, fmt.Errorf("faile to sqlx connect: %w", err)
-    }
-    defer conn.Close()
+	conn, err := sqlx.ConnectContext(context.Background(), "pgx", connString)
+	if err != nil {
+		return nil, fmt.Errorf("faile to sqlx connect: %w", err)
+	}
+	defer conn.Close()
 
 	migrator := db.NewMigrator(logger, conn)
 	if err := migrator.Migrate(); err != nil {
@@ -111,7 +111,7 @@ func (rep *Repo) GetResult(ctx context.Context, name string) (Stats, error) {
 	}
 
 	return Stats{
-		Wins: wins,
+		Wins:  wins,
 		Loses: loses,
 	}, nil
 }
@@ -119,7 +119,7 @@ func (rep *Repo) GetResult(ctx context.Context, name string) (Stats, error) {
 // RegisterUser inserts a new user with an already-hashed password
 func (rep *Repo) RegisterUser(ctx context.Context, name, hashedPassword string) error {
 	query := `INSERT INTO users (name, password) VALUES ($1, $2)`
-    _, err := rep.pool.Exec(ctx, query, name, hashedPassword)
+	_, err := rep.pool.Exec(ctx, query, name, hashedPassword)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -127,22 +127,20 @@ func (rep *Repo) RegisterUser(ctx context.Context, name, hashedPassword string) 
 		}
 		return fmt.Errorf("failed to register user: %w", err)
 	}
-	
+
 	return nil
 }
 
 // GetPasswordHash returns the stored bcrypt hash for a user
 func (rep *Repo) GetPasswordHash(ctx context.Context, name string) (string, error) {
 	query := `SELECT password FROM users WHERE name = $1`
-    var hashed string
-    err := rep.pool.QueryRow(ctx, query, name).Scan(&hashed)
-    if err != nil {
-        if errors.Is(err, pgx.ErrNoRows) {
-            return "", fmt.Errorf("user not found")
-        }
-        return "", fmt.Errorf("failed to get password hash: %w", err)
-    }
-    return hashed, nil
+	var hashed string
+	err := rep.pool.QueryRow(ctx, query, name).Scan(&hashed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("user not found")
+		}
+		return "", fmt.Errorf("failed to get password hash: %w", err)
+	}
+	return hashed, nil
 }
-
-

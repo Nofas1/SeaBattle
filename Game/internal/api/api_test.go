@@ -1,4 +1,4 @@
-package ui
+package api
 
 import (
 	"encoding/json"
@@ -24,7 +24,7 @@ func TestAuthRequestReturnsToken(test *testing.T) {
 	}))
 	defer server.Close()
 
-	token, err := authRequest(server.URL, "captain", "secret")
+	token, err := AuthRequestHandler(server.URL, "captain", "secret")
 	if err != nil || token != "signed-token" {
 		test.Fatalf("authRequest() = %q, %v; want signed-token", token, err)
 	}
@@ -48,7 +48,7 @@ func TestAuthRequestRejectsInvalidResponses(test *testing.T) {
 				_, _ = writer.Write([]byte(testCase.body))
 			}))
 			defer server.Close()
-			_, err := authRequest(server.URL, "captain", "secret")
+			_, err := AuthRequestHandler(server.URL, "captain", "secret")
 			if err == nil || !strings.Contains(err.Error(), testCase.wantError) {
 				test.Errorf("authRequest() error = %v; want containing %q", err, testCase.wantError)
 			}
@@ -60,7 +60,7 @@ func TestAuthRequestReturnsTransportErrors(test *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	url := server.URL
 	server.Close()
-	if _, err := authRequest(url, "captain", "secret"); err == nil {
+	if _, err := AuthRequestHandler(url, "captain", "secret"); err == nil {
 		test.Error("authRequest() error = nil; expected transport error")
 	}
 }

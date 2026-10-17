@@ -1,17 +1,13 @@
 package ui
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"sea_battle/Game/internal/domain"
 	"sea_battle/Game/internal/game"
 	"sea_battle/my_types"
 	"strings"
+	"sea_battle/Game/internal/api"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -33,27 +29,10 @@ const (
 	offsetY     = int32(PADDING)
 )
 
-type AuthRequest struct {
-	Name     string `json:"name"`
-	Password string `json:"password"`
-}
-
-type AuthResponse struct {
-	Token string `json:"token"`
-}
-
-type AuthBox int
-
-const (
-	BoxNone AuthBox = iota
-	BoxUsername
-	BoxPassword
-)
-
 func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
 	username := ""
 	password := ""
-	activeBox := BoxNone
+	activeBox := api.BoxNone
 	loginError := ""
 
 	for !rl.WindowShouldClose() {
@@ -61,20 +40,20 @@ func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
 
 		key := rl.GetCharPressed()
 		for key > 0 {
-			if activeBox == BoxUsername {
+			if activeBox == api.BoxUsername {
 				username += string(rune(key))
 			}
-			if activeBox == BoxPassword {
+			if activeBox == api.BoxPassword {
 				password += string(rune(key))
 			}
 			key = rl.GetCharPressed()
 		}
 
 		if rl.IsKeyPressed(rl.KeyBackspace) {
-			if activeBox == BoxUsername && len(username) > 0 {
+			if activeBox == api.BoxUsername && len(username) > 0 {
 				username = username[:len(username)-1]
 			}
-			if activeBox == BoxPassword && len(password) > 0 {
+			if activeBox == api.BoxPassword && len(password) > 0 {
 				password = password[:len(password)-1]
 			}
 		}
@@ -89,11 +68,11 @@ func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
 		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
 			switch {
 			case rl.CheckCollisionPointRec(mouse, userRect):
-				activeBox = BoxUsername
+				activeBox = api.BoxUsername
 			case rl.CheckCollisionPointRec(mouse, passRect):
-				activeBox = BoxPassword
+				activeBox = api.BoxPassword
 			case rl.CheckCollisionPointRec(mouse, loginBtn):
-				token, err := authRequest("http://localhost:28080/login", username, password)
+				token, err := api.AuthRequestHandler("http://localhost:28080/login", username, password)
 				if err != nil {
 					logger.Error(
 						"login failed",
@@ -104,7 +83,7 @@ func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
 					return token
 				}
 			case rl.CheckCollisionPointRec(mouse, registerBtn):
-				_, err := authRequest("http://localhost:28080/register", username, password)
+				_, err := api.AuthRequestHandler("http://localhost:28080/register", username, password)
 				if err != nil {
 					logger.Error(
 						"register failed",
@@ -145,44 +124,6 @@ func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
 	}
 
 	return ""
-}
-
-func authRequest(url, username, password string) (string, error) {
-	body, err := json.Marshal(map[string]string{
-		"name":     username,
-		"password": password,
-	})
-	if err != nil {
-		return "", err
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-    if err != nil {
-        return "", fmt.Errorf("failed to read response: %w", err)
-    }
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-        return "", fmt.Errorf("%s", strings.TrimSpace(string(respBody)))
-    }
-
-	var authResp AuthResponse
-    if err := json.Unmarshal(respBody, &authResp); err != nil {
-        return "", fmt.Errorf("failed to decode response: %w", err)
-    }
-    if authResp.Token == "" {
-        return "", fmt.Errorf("empty token in response")
-    }
-
-	// var authResp AuthResponse
-	// if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
-	// 	return "", err
-	// }
-	return authResp.Token, nil
 }
 
 func SelectBot(userField *domain.Field, music rl.Music, logger *slog.Logger, token string) game.Bot {

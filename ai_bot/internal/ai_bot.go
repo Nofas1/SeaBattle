@@ -83,6 +83,10 @@ func fallbackShot(field *my_types.Field) my_types.Pair {
 }
 
 func (ab *AIBot) Shoot(field *my_types.Field) my_types.Pair {
+	return ab.ShootContext(context.Background(), field)
+}
+
+func (ab *AIBot) ShootContext(ctx context.Context, field *my_types.Field) my_types.Pair {
 	fallback := fallbackShot(field)
 	if fallback.X < 0 {
 		return fallback
@@ -91,7 +95,7 @@ func (ab *AIBot) Shoot(field *my_types.Field) my_types.Pair {
 	for attempt := 0; attempt < 3; attempt++ {
 		req := fmt.Sprintf("You recieve a current field positon: \n%s\n, choose where you want to shoot, Reply with two integers only (e.g. \"1 2\")", curr_field)
 
-		resp, err := ab.OpenAIClient.Responses.New(context.Background(), responses.ResponseNewParams{
+		resp, err := ab.OpenAIClient.Responses.New(ctx, responses.ResponseNewParams{
 			Input: responses.ResponseNewParamsInputUnion{OfString: openai.String(req)},
 			Model: openai.ChatModelChatgpt4oLatest,
 		})

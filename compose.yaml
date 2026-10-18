@@ -1,4 +1,16 @@
 services:
+  postgres:
+    ports:
+      - "5432:5432"
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: newpassword
+      POSTGRES_DB: sea_battle
+    image: postgres:17
+    restart: unless-stopped
+    networks:
+      - sea_battle
   proxy:
     ports:
       - "28080:28080"
@@ -12,6 +24,7 @@ services:
       - simple_bot
       - smart_bot
       - ai_bot
+      - postgres
     restart: unless-stopped
     networks:
       - sea_battle
@@ -31,8 +44,6 @@ services:
     ports:
       - "8082:28080"
     container_name: smart_bot
-    env_file:
-      - smart_bot/.env
     build:
       context: .
       dockerfile: smart_bot/Dockerfile

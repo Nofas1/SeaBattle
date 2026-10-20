@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -52,8 +53,22 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 func (h *Handler) SetResultHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		// Preserve the legacy numeric body while accepting the proxy's per-session envelope.
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "failed to read shot result", http.StatusBadRequest)
+			return
+		}
 		var res my_types.ShotResult
-		err := json.NewDecoder(r.Body).Decode(&res)
+		if len(body) > 0 && body[0] == '{' {
+			var request struct {
+				Result my_types.ShotResult `json:"result"`
+			}
+			err = json.Unmarshal(body, &request)
+			res = request.Result
+		} else {
+			err = json.Unmarshal(body, &res)
+		}
 		if err != nil {
 			h.logger.Error(
 				"failed to decode shot result",
@@ -64,6 +79,21 @@ func (h *Handler) SetResultHandler() http.HandlerFunc {
 			return
 		}
 		h.bot.SetResult(res)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func (h *Handler) LifecycleHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		// Stateless bots share lifecycle routes so the proxy can use one protocol.
+		var request struct {
+			UserKey string `json:"user_key"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -123,6 +153,8 @@ func main() {
 	http.HandleFunc("/shoot", h.ShootHandler())
 	http.HandleFunc("/set_result", h.SetResultHandler())
 	http.HandleFunc("/place", h.PlaceHandler())
+	http.HandleFunc("/start", h.LifecycleHandler())
+	http.HandleFunc("/game_over", h.LifecycleHandler())
 	http.HandleFunc("/health", h.HealthHandler())
 
 	logger.Info("Listening on", "Adr", cfg.BotCfg.Address, "Port", cfg.BotCfg.Port)

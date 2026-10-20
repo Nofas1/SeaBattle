@@ -7,4 +7,4 @@ WORKDIR /proxy
 EXPOSE 28080
 
 
-ENTRYPOINT [ "go", "run", "proxy/cmd/main.go", "--config=proxy/config.yaml" ]
+ENTRYPOINT [ "go", "run", "./proxy/cmd/.", "--config=proxy/config.yaml" ]

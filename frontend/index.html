@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f1419">
+    <title>Sea Battle</title>
+    <link rel="stylesheet" href="/css/style.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section id="screen-auth" class="screen" aria-labelledby="auth-title">
+        <div class="auth-card panel">
+          <p class="eyebrow">SEA BATTLE</p>
+          <h1 id="auth-title">Welcome back</h1>
+          <div class="tabs" role="tablist" aria-label="Authentication">
+            <button id="auth-tab-login" class="tab active" type="button" role="tab" aria-selected="true">Sign in</button>
+            <button id="auth-tab-register" class="tab" type="button" role="tab" aria-selected="false">Register</button>
+          </div>
+          <form id="auth-form" novalidate>
+            <label for="auth-name">Username</label>
+            <input id="auth-name" name="name" autocomplete="username" required>
+            <small class="field-error" data-error-for="name"></small>
+            <label for="auth-password">Password</label>
+            <input id="auth-password" name="password" type="password" autocomplete="current-password" required>
+            <small class="field-error" data-error-for="password"></small>
+            <p id="auth-form-error" class="form-error" role="alert"></p>
+            <button id="auth-submit" class="button button-primary" type="submit">Sign in</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="screen-bots" class="screen hidden" aria-labelledby="bots-title">
+        <header class="page-header">
+          <div><p class="eyebrow">SEA BATTLE</p><h1 id="bots-title">Choose your opponent</h1></div>
+          <button id="logout-button" class="button button-quiet" type="button">Sign out</button>
+        </header>
+        <div id="bot-list" class="bot-grid" aria-live="polite">
+          <p class="subtle">Loading configured opponents...</p>
+        </div>
+      </section>
+
+      <section id="screen-placement" class="screen hidden" aria-labelledby="placement-title">
+        <header class="page-header">
+          <div><p class="eyebrow">FLEET SETUP</p><h1 id="placement-title">Place your fleet</h1></div>
+          <button id="placement-back" class="button button-quiet" type="button">Back to opponents</button>
+        </header>
+        <div class="game-layout placement-layout">
+          <div class="board-card panel">
+            <h2>Your fleet</h2>
+            <div id="placement-board" class="board" aria-label="Your fleet placement board"></div>
+          </div>
+          <aside class="side-panel panel">
+            <h2>Ships to place</h2>
+            <ol id="ship-list" class="ship-list"></ol>
+            <p id="placement-message" class="status-message" role="status"></p>
+            <button id="rotate-button" class="button button-secondary" type="button">Rotate (R)</button>
+            <button id="start-battle-button" class="button button-primary" type="button" disabled>Start battle</button>
+          </aside>
+          <div class="board-card panel bot-preview">
+            <h2>Enemy fleet</h2>
+            <div id="placement-opponent-board" class="board board-locked" aria-label="Empty opponent board"></div>
+            <p class="subtle">Enemy ships stay hidden.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-battle" class="screen hidden" aria-labelledby="battle-title">
+        <header class="page-header">
+          <div><p class="eyebrow">BATTLE</p><h1 id="battle-title">Sea Battle</h1></div>
+          <div class="battle-controls">
+            <p id="battle-status" class="turn-indicator" role="status">Connecting...</p>
+            <button id="retry-state-button" class="button button-quiet hidden" type="button">Retry connection</button>
+          </div>
+        </header>
+        <div class="game-layout battle-layout">
+          <div class="board-card panel">
+            <h2>Your fleet</h2>
+            <div id="battle-player-board" class="board" aria-label="Your fleet and incoming shots"></div>
+          </div>
+          <div class="board-card panel">
+            <h2>Enemy fleet</h2>
+            <div id="battle-opponent-board" class="board board-not-turn" aria-label="Enemy fleet and your shots"></div>
+            <p class="subtle">Enemy ships remain hidden until sunk.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section id="modal-end" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="end-title">
+      <div class="modal-card panel">
+        <p class="eyebrow">BATTLE COMPLETE</p>
+        <p id="end-icon" class="end-icon" aria-hidden="true">🏆</p>
+        <h2 id="end-title">Victory!</h2>
+        <button id="play-again-button" class="button button-primary" type="button">Play again</button>
+        <p class="subtle">Press Enter to play again.</p>
+      </div>
+    </section>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    <script src="/dist/bundle.js" defer></script>
+  </body>
+</html>

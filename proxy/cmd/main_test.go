@@ -8,10 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"sea_battle/my_types"
 	"sea_battle/proxy/config"
 	mw "sea_battle/proxy/middleware"
 
@@ -52,7 +54,7 @@ func TestProxyHandlerStoresGameResultAndReportsPersistenceErrors(test *testing.T
 			proxy.rep = rep
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(`{"name":"simple_bot","action":"game_over","user_key":"game-2","user_win":true}`))
-			proxy.ProxyHandler().ServeHTTP(recorder, request)
+			proxy.legacyProxyHandler().ServeHTTP(recorder, request)
 			if recorder.Code != testCase.wantStatus || rep.matchCalls != 1 || !rep.lastUserWin {
 				test.Errorf("status=%d match calls=%d userWin=%v; want status=%d, one saved win", recorder.Code, rep.matchCalls, rep.lastUserWin, testCase.wantStatus)
 			}
@@ -87,12 +89,159 @@ func TestProxyHandlerPropagatesLifecycleActionErrors(test *testing.T) {
 			recorder := httptest.NewRecorder()
 			body := `{"name":"simple_bot","action":"` + testCase.action + `","user_key":"game-1"}`
 			request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(body))
-			proxy.ProxyHandler().ServeHTTP(recorder, request)
+			proxy.legacyProxyHandler().ServeHTTP(recorder, request)
 			if recorder.Code != testCase.wantStatus {
 				test.Errorf("status = %d; want %d", recorder.Code, testCase.wantStatus)
 			}
 		})
 	}
+}
+
+func TestProxyHandlerListsConfiguredBotsWithoutBotName(test *testing.T) {
+	proxy := &Proxy{
+		bots: map[string]config.BotConfig{
+			"smart_bot":  {URL: "http://smart_bot:28080"},
+			"simple_bot": {URL: "http://simple_bot:28080"},
+			"ai_bot":     {URL: "http://ai_bot:28080"},
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(`{"action":"list_bots"}`))
+
+	proxy.ProxyHandler().ServeHTTP(recorder, request.WithContext(context.WithValue(request.Context(), userContextKey{}, "test-user")))
+
+	if recorder.Code != http.StatusOK {
+		test.Fatalf("status = %d; want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Bots []string `json:"bots"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		test.Fatalf("decode bot list: %v", err)
+	}
+	want := []string{"ai_bot", "simple_bot", "smart_bot"}
+	if !reflect.DeepEqual(response.Bots, want) {
+		test.Fatalf("bots = %v; want %v", response.Bots, want)
+	}
+}
+
+func TestProxyHandlerStartsGameWithConfiguredBot(test *testing.T) {
+	botStarted := false
+	botServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/health":
+			writer.WriteHeader(http.StatusOK)
+		case "/start":
+			botStarted = true
+			writer.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer botServer.Close()
+
+	proxy := newTestProxy(botServer)
+	proxy.rep = &proxyAuthRepoStub{}
+	requestBody, err := json.Marshal(botRequest{
+		Action:      "start_game",
+		BotID:       "simple_bot",
+		PlayerField: testFleet(),
+	})
+	if err != nil {
+		test.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(string(requestBody)))
+	request = request.WithContext(context.WithValue(request.Context(), userContextKey{}, "captain"))
+	recorder := httptest.NewRecorder()
+
+	proxy.ProxyHandler().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated || !botStarted {
+		test.Fatalf("status=%d botStarted=%v body=%q", recorder.Code, botStarted, recorder.Body.String())
+	}
+	var response gameResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		test.Fatalf("decode game response: %v", err)
+	}
+	if response.SessionID == "" || !response.YourTurn || len(response.PlayerField.Ships) != len(fleetSizes) {
+		test.Fatalf("unexpected initial game response: %+v", response)
+	}
+	if strings.Contains(recorder.Body.String(), "enemyField") {
+		test.Fatal("game response exposed the opponent's field")
+	}
+}
+
+func TestSendBotResultUsesConfiguredBotRequestShape(test *testing.T) {
+	tests := []struct {
+		name          string
+		botID         string
+		wantObject    bool
+		expectedValue int
+	}{
+		{name: "simple bot uses numeric result", botID: "simple_bot", expectedValue: int(my_types.Hit)},
+		{name: "AI bot uses numeric result", botID: "ai_bot", expectedValue: int(my_types.Hit)},
+		{name: "smart bot includes session key", botID: "smart_bot", wantObject: true, expectedValue: int(my_types.Hit)},
+	}
+	for _, testCase := range tests {
+		test.Run(testCase.name, func(test *testing.T) {
+			var requestBody []byte
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.URL.Path != "/set_result" {
+					test.Errorf("request path = %q; want /set_result", request.URL.Path)
+				}
+				requestBody, _ = io.ReadAll(request.Body)
+				writer.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			proxy := &Proxy{client: server.Client()}
+			if err := proxy.sendBotResult(context.Background(), testCase.botID, server.URL, "session-1", my_types.Hit); err != nil {
+				test.Fatalf("sendBotResult() error = %v", err)
+			}
+			if testCase.wantObject {
+				var payload struct {
+					UserKey string `json:"user_key"`
+					Result  int    `json:"result"`
+				}
+				if err := json.Unmarshal(requestBody, &payload); err != nil {
+					test.Fatalf("decode smart bot payload: %v", err)
+				}
+				if payload.UserKey != "session-1" || payload.Result != testCase.expectedValue {
+					test.Fatalf("payload = %+v; want session-1 and result %d", payload, testCase.expectedValue)
+				}
+				return
+			}
+
+			var payload int
+			if err := json.Unmarshal(requestBody, &payload); err != nil {
+				test.Fatalf("decode numeric bot payload %q: %v", requestBody, err)
+			}
+			if payload != testCase.expectedValue {
+				test.Fatalf("payload = %d; want %d", payload, testCase.expectedValue)
+			}
+		})
+	}
+}
+
+func testFleet() [][]int {
+	field := emptyField()
+	place := func(x, y, size int) {
+		for offset := 0; offset < size; offset++ {
+			field[x][y+offset] = my_types.SHIP
+		}
+	}
+	place(0, 0, 4)
+	place(2, 0, 3)
+	place(4, 0, 3)
+	place(6, 0, 2)
+	place(8, 0, 2)
+	place(0, 5, 2)
+	place(2, 5, 1)
+	place(4, 5, 1)
+	place(6, 5, 1)
+	place(8, 5, 1)
+	return field
 }
 
 func TestAuthenticationHandlers(test *testing.T) {
@@ -186,6 +335,10 @@ func (rep *proxyAuthRepoStub) GetPasswordHash(context.Context, string) (string, 
 	return rep.passwordHash, nil
 }
 
+func (rep *proxyAuthRepoStub) FindOrCreateGoogleUser(context.Context, string, string) (int64, string, error) {
+	return 1, "google@example.com", nil
+}
+
 func (rep *proxyAuthRepoStub) SetResult(_ context.Context, _ string, userWin bool) error {
 	rep.matchCalls++
 	rep.lastUserWin = userWin
@@ -203,7 +356,7 @@ func newTestProxy(server *httptest.Server) *Proxy {
 func TestProxyHandlerValidatesRequestAndBotName(test *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
-	handler := newTestProxy(server).ProxyHandler()
+	handler := newTestProxy(server).legacyProxyHandler()
 
 	tests := []struct {
 		name       string
@@ -237,7 +390,7 @@ func TestProxyHandlerForwardsSuccessfulBotAction(test *testing.T) {
 		}
 	}))
 	defer server.Close()
-	handler := newTestProxy(server).ProxyHandler()
+	handler := newTestProxy(server).legacyProxyHandler()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(`{"name":"simple_bot","action":"shoot","user_key":"game-1","field":[[0]]}`))
 	handler.ServeHTTP(recorder, request)
@@ -256,7 +409,7 @@ func TestProxyHandlerRejectsUnhealthyBot(test *testing.T) {
 		shootCalled = true
 	}))
 	defer server.Close()
-	handler := newTestProxy(server).ProxyHandler()
+	handler := newTestProxy(server).legacyProxyHandler()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(`{"name":"simple_bot","action":"shoot"}`))
 	handler.ServeHTTP(recorder, request)
@@ -274,7 +427,7 @@ func TestProxyHandlerRejectsBotActionErrors(test *testing.T) {
 		_, _ = writer.Write([]byte(`{"x":2,"y":5}`))
 	}))
 	defer server.Close()
-	handler := newTestProxy(server).ProxyHandler()
+	handler := newTestProxy(server).legacyProxyHandler()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(`{"name":"simple_bot","action":"shoot"}`))
 	handler.ServeHTTP(recorder, request)

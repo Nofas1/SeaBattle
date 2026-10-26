@@ -86,6 +86,10 @@ func (a *AAA) issueToken(name string) (string, error) {
 	return token, nil
 }
 
+func (a *AAA) IssueToken(name string) (string, error) {
+	return a.issueToken(name)
+}
+
 func (a *AAA) Login(name, password string) (string, error) {
 	hashed, err := a.rep.GetPasswordHash(context.Background(), name)
 	if err != nil {

@@ -7,16 +7,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-
-	// "io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"sea_battle/my_types"
 	"sea_battle/proxy/config"
+	"sea_battle/proxy/internal/oauth"
 	"sea_battle/proxy/repository"
+	"sync"
 
+	"github.com/joho/godotenv"
 	mw "sea_battle/proxy/middleware"
 	"strings"
 	"time"
@@ -32,11 +33,16 @@ type AuthResponse struct {
 }
 
 type Proxy struct {
-	client *http.Client
-	rep    proxyRepository
-	bots   map[string]config.BotConfig
-	logger *slog.Logger
+	client     *http.Client
+	rep        proxyRepository
+	bots       map[string]config.BotConfig
+	logger     *slog.Logger
+	sessionsMu sync.Mutex
+	sessions   map[string]*gameSession
+	storeOnce  sync.Once
 }
+
+type userContextKey struct{}
 
 type matchRepository interface {
 	SetResult(context.Context, string, bool) error
@@ -46,6 +52,7 @@ type proxyRepository interface {
 	matchRepository
 	RegisterUser(context.Context, string, string) error
 	GetPasswordHash(context.Context, string) (string, error)
+	FindOrCreateGoogleUser(context.Context, string, string) (int64, string, error)
 }
 
 func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *Proxy {
@@ -66,7 +73,7 @@ func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *Pro
 	}
 }
 
-func (p *Proxy) ProxyHandler() http.HandlerFunc {
+func (p *Proxy) legacyProxyHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		type ProxyRequest struct {
 			Name    string              `json:"name"`
@@ -490,7 +497,8 @@ func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
 
 		// tokenString := bearer_token[1]
 
-		if _, err := auth.Verify(tokenString); err != nil {
+		user, err := auth.Verify(tokenString)
+		if err != nil {
 			p.logger.Error(
 				"Token verification failed",
 				"error", err,
@@ -499,7 +507,7 @@ func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey{}, user)))
 	}
 }
 
@@ -513,6 +521,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		panic(err)
+	}
+	googleFlow, err := oauth.LoadConfigFromEnv()
+	if err != nil {
+		panic(err)
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	proxy := NewProxy(client, cfg, logger)
 	// http.HandleFunc("/bot", proxy.ProxyHandler())
@@ -521,13 +536,17 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	googleAuthHandler := GoogleAuthHandler(googleFlow, proxy.rep, &authService, logger)
 
-	http.HandleFunc("/login", LoginHandler(authService))
-	http.HandleFunc("/register", RegisterHandler(authService))
-	http.HandleFunc("/verify", VerifyHandler(authService))
-	http.Handle("/bot", proxy.AuthHandler(authService, http.HandlerFunc(proxy.ProxyHandler())))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/login", LoginHandler(authService))
+	mux.HandleFunc("/register", RegisterHandler(authService))
+	mux.HandleFunc("/verify", VerifyHandler(authService))
+	mux.HandleFunc("GET /auth/google", googleAuthHandler)
+	mux.HandleFunc("GET /auth/google/callback", googleAuthHandler)
+	mux.Handle("/bot", proxy.AuthHandler(authService, http.HandlerFunc(proxy.ProxyHandler())))
 
 	logger.Info("Listening on", "Adr", cfg.Proxy.Address, "Port", cfg.Proxy.Port)
-	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.Proxy.Address, cfg.Proxy.Port), nil)
+	err = http.ListenAndServe(fmt.Sprintf("%s:%d", cfg.Proxy.Address, cfg.Proxy.Port), corsHandler(mux, googleFlow.FrontendOrigin))
 	fmt.Println(err)
 }

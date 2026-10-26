@@ -1,0 +1,4 @@
+.git
+.env
+credentials.json
+**/credentials.json

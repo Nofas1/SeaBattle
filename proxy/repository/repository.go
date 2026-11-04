@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"sea_battle/proxy/db"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,7 +28,7 @@ type Stats struct {
 
 // loads database config from .env and creates a connection pool
 func NewRepository(logger *slog.Logger) (*Repo, error) {
-	if err := godotenv.Load(); err != nil {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("failed to load .env: %w", err)
 	}
 
@@ -143,4 +144,72 @@ func (rep *Repo) GetPasswordHash(ctx context.Context, name string) (string, erro
 		return "", fmt.Errorf("failed to get password hash: %w", err)
 	}
 	return hashed, nil
+}
+
+func (rep *Repo) FindOrCreateGoogleUser(ctx context.Context, subject, email string) (int64, string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if subject == "" || email == "" {
+		return 0, "", fmt.Errorf("Google subject and email are required")
+	}
+
+	tx, err := rep.pool.Begin(ctx)
+	if err != nil {
+		return 0, "", fmt.Errorf("begin Google user transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('google-email:' || lower($1)))`, email); err != nil {
+		return 0, "", fmt.Errorf("lock Google email: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('google-sub:' || $1))`, subject); err != nil {
+		return 0, "", fmt.Errorf("lock Google subject: %w", err)
+	}
+
+	var userID int64
+	var name string
+	err = tx.QueryRow(ctx,
+		`SELECT user_id, name FROM users WHERE provider = 'google' AND provider_id = $1`,
+		subject,
+	).Scan(&userID, &name)
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return 0, "", fmt.Errorf("commit Google user lookup: %w", err)
+		}
+		return userID, name, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", fmt.Errorf("find Google user: %w", err)
+	}
+
+	err = tx.QueryRow(ctx,
+		`SELECT user_id, name FROM users WHERE provider = 'local' AND lower(name) = lower($1) FOR UPDATE`,
+		email,
+	).Scan(&userID, &name)
+	if err == nil {
+		_, err = tx.Exec(ctx,
+			`UPDATE users SET provider = 'google', provider_id = $1 WHERE user_id = $2`,
+			subject,
+			userID,
+		)
+		if err != nil {
+			return 0, "", fmt.Errorf("link local user to Google: %w", err)
+		}
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		name = email
+		err = tx.QueryRow(ctx,
+			`INSERT INTO users (name, password, provider, provider_id) VALUES ($1, NULL, 'google', $2) RETURNING user_id`,
+			name,
+			subject,
+		).Scan(&userID)
+		if err != nil {
+			return 0, "", fmt.Errorf("create Google user: %w", err)
+		}
+	} else {
+		return 0, "", fmt.Errorf("find local user by email: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, "", fmt.Errorf("commit Google user: %w", err)
+	}
+	return userID, name, nil
 }

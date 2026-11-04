@@ -1,5 +1,12 @@
-import { ApiError, clearToken, setBaseURL, setToken } from "./api/client";
-import { initAuth, handleUnauthorized, logout, restoreSession } from "./auth";
+import { ApiError, clearToken, setBaseURL, setToken, verify } from "./api/client";
+import {
+  initAuth,
+  handleUnauthorized,
+  logout,
+  resetGoogleSignInButton,
+  restoreSession,
+  setGoogleSignInLoading,
+} from "./auth";
 import { initBots } from "./bots";
 import { hideEndModal, refreshGameState, renderBattle } from "./battle";
 import { initPlacement, renderPlacement } from "./placement";
@@ -84,7 +91,8 @@ function navigate(screen: ScreenName): void {
   }
 }
 
-function boot(): void {
+async function boot(): Promise<void> {
+  const googleToken = consumeGoogleToken();
   const apiBaseURL = window.location.port === "8080"
     ? `${window.location.protocol}//${window.location.hostname}:28080`
     : "";
@@ -140,22 +148,69 @@ function boot(): void {
     }
   });
 
-  void restoreSession({
+  if (googleToken !== null) {
+    setGoogleSignInLoading();
+    try {
+      await verify();
+      resetGoogleSignInButton();
+      onAuthenticated();
+    } catch (error) {
+      showScreen("auth");
+      resetGoogleSignInButton();
+      if (isUnauthorized(error)) {
+        logout();
+        resetGame();
+        showToast("Google sign-in failed");
+      } else {
+        showToast(error instanceof Error ? error.message : String(error));
+      }
+    }
+    return;
+  }
+
+  await restoreSession({
     onAuthenticated,
     onUnauthorized: () => {
       state.token = null;
       showScreen("auth");
     },
     onError: showToast,
-  }).then(() => {
-    if (state.token === null) {
-      showScreen("auth");
-    }
-  }).catch(handleApiError);
+  });
+  if (state.token === null) {
+    showScreen("auth");
+  }
+}
+
+function consumeGoogleToken(): string | null {
+  const hash = window.location.hash;
+  const prefix = "#auth?";
+  if (!hash.startsWith(prefix)) {
+    return null;
+  }
+  const query = new URLSearchParams(hash.slice(prefix.length));
+  if (!query.has("token")) {
+    return null;
+  }
+
+  const token = query.get("token");
+  window.history.replaceState(null, "", window.location.pathname + "#auth");
+  if (token === null || token.length === 0) {
+    return null;
+  }
+  localStorage.setItem("sb_token", token);
+  setToken(token);
+  state.token = token;
+  return token;
+}
+
+function isUnauthorized(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
 }
 
 function isScreenName(value: unknown): value is ScreenName {
   return value === "auth" || value === "bots" || value === "placement" || value === "battle";
 }
 
-document.addEventListener("DOMContentLoaded", boot, { once: true });
+document.addEventListener("DOMContentLoaded", () => {
+  void boot().catch(handleApiError);
+}, { once: true });

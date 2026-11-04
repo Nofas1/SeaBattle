@@ -1,4 +1,4 @@
-import { clearToken, login, register, setToken, verify } from "./api/client";
+import { baseURL, clearToken, login, register, setToken, verify } from "./api/client";
 import { state } from "./state";
 
 export interface AuthCallbacks {
@@ -8,6 +8,7 @@ export interface AuthCallbacks {
 }
 
 export function initAuth(callbacks: AuthCallbacks): void {
+  const googleButton = document.querySelector<HTMLButtonElement>("#auth-google-button");
   const loginTab = document.querySelector<HTMLButtonElement>("#auth-tab-login");
   const registerTab = document.querySelector<HTMLButtonElement>("#auth-tab-register");
   const form = document.querySelector<HTMLFormElement>("#auth-form");
@@ -15,6 +16,17 @@ export function initAuth(callbacks: AuthCallbacks): void {
   const nameInput = document.querySelector<HTMLInputElement>("#auth-name");
   const passwordInput = document.querySelector<HTMLInputElement>("#auth-password");
   const formError = document.querySelector<HTMLParagraphElement>("#auth-form-error");
+
+  googleButton?.addEventListener("click", () => {
+    googleButton.disabled = true;
+    googleButton.textContent = "Redirecting to Google...";
+    window.location.href = `${baseURL}/auth/google`;
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) {
+      resetGoogleSignInButton();
+    }
+  });
 
   loginTab?.addEventListener("click", () => setAuthMode("login"));
   registerTab?.addEventListener("click", () => setAuthMode("register"));
@@ -76,6 +88,22 @@ export function initAuth(callbacks: AuthCallbacks): void {
       }
     }
   });
+}
+
+export function setGoogleSignInLoading(): void {
+  const googleButton = document.querySelector<HTMLButtonElement>("#auth-google-button");
+  if (googleButton !== null) {
+    googleButton.disabled = true;
+    googleButton.textContent = "Signing in...";
+  }
+}
+
+export function resetGoogleSignInButton(): void {
+  const googleButton = document.querySelector<HTMLButtonElement>("#auth-google-button");
+  if (googleButton !== null) {
+    googleButton.disabled = false;
+    googleButton.textContent = "Continue with Google";
+  }
 }
 
 export async function restoreSession(

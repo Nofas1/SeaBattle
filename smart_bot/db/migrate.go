@@ -14,38 +14,40 @@ import (
 var migrationFiles embed.FS
 
 type Migrator struct {
-    log  *slog.Logger
-    conn *sqlx.DB
+	log  *slog.Logger
+	conn *sqlx.DB
 }
 
 func NewMigrator(log *slog.Logger, conn *sqlx.DB) *Migrator {
-    return &Migrator{log: log, conn: conn}
+	return &Migrator{log: log, conn: conn}
 }
 
 func (mg *Migrator) Migrate() error {
-    mg.log.Debug("running migration")
+	mg.log.Debug("running migration")
 
-    files, err := iofs.New(migrationFiles, "migrations")
-    if err != nil {
-        return err
-    }
+	files, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
+		return err
+	}
 
-    driver, err := pgx.WithInstance(mg.conn.DB, &pgx.Config{})
-    if err != nil {
-        return err
-    }
+	driver, err := pgx.WithInstance(mg.conn.DB, &pgx.Config{
+		MigrationsTable: "smart_bot_schema_migrations",
+	})
+	if err != nil {
+		return err
+	}
 
-    m, err := migrate.NewWithInstance("iofs", files, "pgx", driver)
-    if err != nil {
-        return err
-    }
+	m, err := migrate.NewWithInstance("iofs", files, "pgx", driver)
+	if err != nil {
+		return err
+	}
 
-    err = m.Up()
-    if err != nil && err != migrate.ErrNoChange {
-        mg.log.Error("migration failed", "error", err)
-        return err
-    }
+	err = m.Up()
+	if err != nil && err != migrate.ErrNoChange {
+		mg.log.Error("migration failed", "error", err)
+		return err
+	}
 
-    mg.log.Debug("migration finished")
-    return nil
+	mg.log.Debug("migration finished")
+	return nil
 }

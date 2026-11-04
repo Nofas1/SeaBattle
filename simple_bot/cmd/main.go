@@ -45,8 +45,10 @@ func (h *Handler) ShootHandler() http.HandlerFunc {
 
 		shot := h.bot.Shoot(&field)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(shot)
 		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(shot); err != nil {
+			h.logger.Error("failed to encode shot response", "source", "simple_bot", "error", err)
+		}
 	}
 }
 
@@ -108,8 +110,10 @@ func (h *Handler) PlaceHandler() http.HandlerFunc {
 
 		x, y, dir := h.bot.Place()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(PlaceResponse{X: x, Y: y, Dir: dir})
 		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(PlaceResponse{X: x, Y: y, Dir: dir}); err != nil {
+			h.logger.Error("failed to encode place response", "source", "simple_bot", "error", err)
+		}
 	}
 }
 

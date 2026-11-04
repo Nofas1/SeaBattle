@@ -26,7 +26,7 @@ The bot cards are loaded at runtime from the authenticated `POST /bot` action `l
    python -m http.server 8080 --directory frontend
    ```
 
-4. Open <http://localhost:8080>, register or sign in, place all ten ships, then select an opponent and play. The proxy accepts browser requests from `http://localhost:8080` and `http://localhost:3000`.
+4. Open <http://127.0.0.1:8080>, register or sign in, place all ten ships, then select an opponent and play. The proxy accepts browser requests from `http://127.0.0.1:8080` and `http://127.0.0.1:3000`.
 
 The proxy listens on port `28080` by default. To serve through the same-origin Go frontend server instead, build the bundle and run `go run ./frontend`; it defaults to `http://127.0.0.1:3000`.
 

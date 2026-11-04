@@ -72,7 +72,7 @@ func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
 			case rl.CheckCollisionPointRec(mouse, passRect):
 				activeBox = api.BoxPassword
 			case rl.CheckCollisionPointRec(mouse, loginBtn):
-				token, err := api.AuthRequestHandler("http://localhost:28080/login", username, password)
+				token, err := api.AuthRequestHandler("http://127.0.0.1:28080/login", username, password)
 				if err != nil {
 					logger.Error(
 						"login failed",
@@ -83,7 +83,7 @@ func DrawAuthWindow(music rl.Music, logger *slog.Logger) string {
 					return token
 				}
 			case rl.CheckCollisionPointRec(mouse, registerBtn):
-				_, err := api.AuthRequestHandler("http://localhost:28080/register", username, password)
+				_, err := api.AuthRequestHandler("http://127.0.0.1:28080/register", username, password)
 				if err != nil {
 					logger.Error(
 						"register failed",
@@ -174,26 +174,26 @@ func SelectBot(userField *domain.Field, music rl.Music, logger *slog.Logger, tok
 						"bot selected",
 						"bot", "simple_bot",
 					)
-					return game.NewBotProxy(userField, "http://localhost:28080", "simple_bot", logger, token)
+					return game.NewBotProxy(userField, "http://127.0.0.1:28080", "simple_bot", logger, token)
 				case "Smart Bot":
 					logger.Info(
 						"bot selected",
 						"bot", "smart_bot",
 					)
-					return game.NewBotProxy(userField, "http://localhost:28080", "smart_bot", logger, token)
+					return game.NewBotProxy(userField, "http://127.0.0.1:28080", "smart_bot", logger, token)
 				case "AI Bot":
 					logger.Info(
 						"bot selected",
 						"bot", "ai_bot",
 					)
-					return game.NewBotProxy(userField, "http://localhost:28080", "ai_bot", logger, token)
+					return game.NewBotProxy(userField, "http://127.0.0.1:28080", "ai_bot", logger, token)
 				}
 			}
 		}
 
 		rl.EndDrawing()
 	}
-	return game.NewBotProxy(userField, "http://localhost:28080", "simple_bot", logger, token)
+	return game.NewBotProxy(userField, "http://127.0.0.1:28080", "simple_bot", logger, token)
 }
 
 func DrawGrid(offsetX, offsetY int32, matrix [][]int, hideShips bool) {

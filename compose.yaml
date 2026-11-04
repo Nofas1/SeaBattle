@@ -17,14 +17,27 @@ services:
     container_name: proxy
     env_file:
       - .env
+    environment:
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_CREDENTIALS_JSON: ${GOOGLE_CREDENTIALS_JSON:-/run/secrets/google-oauth.json}
+      GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-http://127.0.0.1:28080/auth/google/callback}
+      FRONTEND_URL: ${FRONTEND_URL:-http://127.0.0.1:8080}
+      IS_PROD: "${IS_PROD:-false}"
+    volumes:
+      - "${GOOGLE_CREDENTIALS_FILE:-./credentials.json}:/run/secrets/google-oauth.json:ro"
     build:
       context: .
       dockerfile: proxy/Dockerfile
     depends_on:
-      - simple_bot
-      - smart_bot
-      - ai_bot
-      - postgres
+      postgres:
+        condition: service_healthy
+      simple_bot:
+        condition: service_started
+      smart_bot:
+        condition: service_started
+      ai_bot:
+        condition: service_started
     restart: unless-stopped
     networks:
       - sea_battle
@@ -44,10 +57,15 @@ services:
     ports:
       - "8082:28080"
     container_name: smart_bot
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
     build:
       context: .
       dockerfile: smart_bot/Dockerfile
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - sea_battle
 
@@ -62,6 +80,28 @@ services:
     networks:
       - sea_battle
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sea_battle}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - sea_battle
+
 networks:
   sea_battle:
     driver: bridge
+
+volumes:
+  postgres_data:

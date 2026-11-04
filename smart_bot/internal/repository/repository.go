@@ -8,6 +8,7 @@ import (
 	"os"
 	"sea_battle/my_types"
 	"sea_battle/smart_bot/db"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,19 +38,15 @@ type BotState struct {
 
 // loads database config from .env and creates a connection pool
 func NewRepository(logger *slog.Logger) (*Repo, error) {
-	if err := godotenv.Load(); err != nil {
-		return nil, fmt.Errorf("failed to load .env: %w", err)
+	connString, err := loadDatabaseURL()
+	if err != nil {
+		return nil, err
 	}
-
-	connString := os.Getenv("DATABASE_URL")
-	if connString == "" {
-		return nil, fmt.Errorf("DATABASE_URL not set")
+	conn, err := sqlx.ConnectContext(context.Background(), "pgx", connString)
+	if err != nil {
+		return nil, fmt.Errorf("faile to sqlx connect: %w", err)
 	}
-    conn, err := sqlx.ConnectContext(context.Background(), "pgx", connString)
-    if err != nil {
-        return nil, fmt.Errorf("faile to sqlx connect: %w", err)
-    }
-    defer conn.Close()
+	defer conn.Close()
 
 	migrator := db.NewMigrator(logger, conn)
 	if err := migrator.Migrate(); err != nil {
@@ -64,6 +61,18 @@ func NewRepository(logger *slog.Logger) (*Repo, error) {
 	}
 
 	return &Repo{pool: pool}, nil
+}
+
+func loadDatabaseURL() (string, error) {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("failed to load .env: %w", err)
+	}
+
+	connString := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if connString == "" {
+		return "", fmt.Errorf("DATABASE_URL not set")
+	}
+	return connString, nil
 }
 
 // deletes all state and memory for a given user session

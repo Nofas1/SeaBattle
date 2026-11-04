@@ -101,7 +101,7 @@ type botRequest struct {
 	Y           *int    `json:"y"`
 }
 
-func (p *MyProxy) ensureSessionStore() {
+func (p *Proxy) ensureSessionStore() {
 	p.storeOnce.Do(func() {
 		if p.sessions == nil {
 			p.sessions = make(map[string]*gameSession)
@@ -110,7 +110,7 @@ func (p *MyProxy) ensureSessionStore() {
 	})
 }
 
-func (p *MyProxy) collectExpiredSessions() {
+func (p *Proxy) collectExpiredSessions() {
 	ticker := time.NewTicker(sessionGCPeriod)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -139,7 +139,7 @@ func (p *MyProxy) collectExpiredSessions() {
 	}
 }
 
-func (p *MyProxy) ProxyHandler() http.HandlerFunc {
+func (p *Proxy) ProxyHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -188,7 +188,7 @@ func (p *MyProxy) ProxyHandler() http.HandlerFunc {
 	}
 }
 
-func (p *MyProxy) startGame(w http.ResponseWriter, r *http.Request, user string, req botRequest) {
+func (p *Proxy) startGame(w http.ResponseWriter, r *http.Request, user string, req botRequest) {
 	if req.BotID == "" {
 		http.Error(w, "botId is required", http.StatusBadRequest)
 		return
@@ -243,7 +243,7 @@ func (p *MyProxy) startGame(w http.ResponseWriter, r *http.Request, user string,
 	writeJSON(w, http.StatusCreated, p.response(session, nil, nil))
 }
 
-func (p *MyProxy) shoot(w http.ResponseWriter, r *http.Request, user string, req botRequest, x, y int) {
+func (p *Proxy) shoot(w http.ResponseWriter, r *http.Request, user string, req botRequest, x, y int) {
 	session, ok := p.findSession(req.SessionID, user)
 	if !ok {
 		http.Error(w, "game session not found or expired", http.StatusNotFound)
@@ -276,7 +276,7 @@ func (p *MyProxy) shoot(w http.ResponseWriter, r *http.Request, user string, req
 	writeJSON(w, http.StatusOK, p.response(session, playerShot, botShot))
 }
 
-func (p *MyProxy) getState(w http.ResponseWriter, r *http.Request, user string, req botRequest) {
+func (p *Proxy) getState(w http.ResponseWriter, r *http.Request, user string, req botRequest) {
 	session, ok := p.findSession(req.SessionID, user)
 	if !ok {
 		http.Error(w, "game session not found or expired", http.StatusNotFound)
@@ -304,7 +304,7 @@ func (p *MyProxy) getState(w http.ResponseWriter, r *http.Request, user string, 
 	writeJSON(w, http.StatusOK, p.response(session, nil, botShot))
 }
 
-func (p *MyProxy) findSession(id, user string) (*gameSession, bool) {
+func (p *Proxy) findSession(id, user string) (*gameSession, bool) {
 	p.ensureSessionStore()
 	p.sessionsMu.Lock()
 	session, ok := p.sessions[id]
@@ -320,7 +320,7 @@ func (p *MyProxy) findSession(id, user string) (*gameSession, bool) {
 	return session, true
 }
 
-func (p *MyProxy) applyPlayerShot(session *gameSession, x, y int) *shotView {
+func (p *Proxy) applyPlayerShot(session *gameSession, x, y int) *shotView {
 	cell := session.enemyField[x][y]
 	result := "Miss"
 	if cell == my_types.SHIP {
@@ -353,7 +353,7 @@ func (p *MyProxy) applyPlayerShot(session *gameSession, x, y int) *shotView {
 	return shot
 }
 
-func (p *MyProxy) applyBotShot(ctx context.Context, session *gameSession) (*shotView, error) {
+func (p *Proxy) applyBotShot(ctx context.Context, session *gameSession) (*shotView, error) {
 	cfg := p.bots[session.botID]
 	for attempt := 0; attempt < my_types.Size*my_types.Size; attempt++ {
 		var target point
@@ -369,7 +369,7 @@ func (p *MyProxy) applyBotShot(ctx context.Context, session *gameSession) (*shot
 		}
 		key := cellKey(target.X, target.Y)
 		if _, alreadyShot := session.enemyShots[key]; alreadyShot {
-			if err := p.sendBotResult(ctx, cfg.URL, session.id, my_types.Already); err != nil {
+			if err := p.sendBotResult(ctx, session.botID, cfg.URL, session.id, my_types.Already); err != nil {
 				return nil, err
 			}
 			continue
@@ -388,7 +388,7 @@ func (p *MyProxy) applyBotShot(ctx context.Context, session *gameSession) (*shot
 				botResult = my_types.Sink
 			}
 		}
-		if err := p.sendBotResult(ctx, cfg.URL, session.id, botResult); err != nil {
+		if err := p.sendBotResult(ctx, session.botID, cfg.URL, session.id, botResult); err != nil {
 			return nil, err
 		}
 
@@ -420,7 +420,7 @@ func (p *MyProxy) applyBotShot(ctx context.Context, session *gameSession) (*shot
 	return nil, errors.New("bot did not choose an unshot cell")
 }
 
-func (p *MyProxy) saveGameResult(session *gameSession) {
+func (p *Proxy) saveGameResult(session *gameSession) {
 	if !session.resultSaved {
 		if p.rep == nil {
 			session.resultSaved = true
@@ -447,7 +447,7 @@ func (p *MyProxy) saveGameResult(session *gameSession) {
 	}
 }
 
-func (p *MyProxy) response(session *gameSession, playerShot, botShot *shotView) gameResponse {
+func (p *Proxy) response(session *gameSession, playerShot, botShot *shotView) gameResponse {
 	return gameResponse{
 		SessionID:          session.id,
 		PlayerShot:         playerShot,
@@ -645,7 +645,7 @@ func generateEnemyFleet() ([][]int, []shipState, error) {
 	return nil, nil, errors.New("unable to generate a valid fleet after 100 attempts")
 }
 
-func (p *MyProxy) checkBot(ctx context.Context, baseURL string) error {
+func (p *Proxy) checkBot(ctx context.Context, baseURL string) error {
 	target, err := url.JoinPath(baseURL, "health")
 	if err != nil {
 		return fmt.Errorf("invalid bot health URL: %w", err)
@@ -667,7 +667,7 @@ func (p *MyProxy) checkBot(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-func (p *MyProxy) callBot(ctx context.Context, baseURL, path string, requestBody, responseBody any, ignoreNotFound bool) error {
+func (p *Proxy) callBot(ctx context.Context, baseURL, path string, requestBody, responseBody any, ignoreNotFound bool) error {
 	target, err := url.JoinPath(baseURL, path)
 	if err != nil {
 		return fmt.Errorf("invalid bot URL: %w", err)
@@ -708,8 +708,11 @@ func (p *MyProxy) callBot(ctx context.Context, baseURL, path string, requestBody
 	return nil
 }
 
-func (p *MyProxy) sendBotResult(ctx context.Context, baseURL, sessionID string, result my_types.ShotResult) error {
-	payload := map[string]any{"user_key": sessionID, "result": result}
+func (p *Proxy) sendBotResult(ctx context.Context, botID, baseURL, sessionID string, result my_types.ShotResult) error {
+	var payload any = result
+	if botID == "smart_bot" {
+		payload = map[string]any{"user_key": sessionID, "result": result}
+	}
 	return p.callBot(ctx, baseURL, "set_result", payload, nil, false)
 }
 

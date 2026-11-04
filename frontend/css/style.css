@@ -180,6 +180,18 @@ input[aria-invalid="true"] {
   background: #63b3ed;
 }
 
+.button-google {
+  width: 100%;
+  margin-bottom: 20px;
+  border-color: #d1d5db;
+  background: #fff;
+  color: #1f2937;
+}
+
+.button-google:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
 .button-secondary {
   border-color: var(--c-border);
   background: var(--c-water-hover);

@@ -22,7 +22,7 @@ func main() {
 		log.Fatal("SEABATTLE_API_URL must be an absolute URL")
 	}
 
-	address := envOrDefault("FRONTEND_ADDR", "127.0.0.1:3000")
+	address := envOrDefault("FRONTEND_URL", "127.0.0.1:8080")
 	staticFS, err := fs.Sub(staticFiles, ".")
 	if err != nil {
 		log.Fatal(err)
@@ -35,6 +35,8 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.Handle("GET /auth/google", apiProxy)
+	mux.Handle("GET /auth/google/callback", apiProxy)
 	mux.Handle("POST /login", apiProxy)
 	mux.Handle("POST /register", apiProxy)
 	mux.Handle("GET /verify", apiProxy)

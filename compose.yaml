@@ -1,4 +1,16 @@
 services:
+  postgres:
+    ports:
+      - "5432:5432"
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: newpassword
+      POSTGRES_DB: sea_battle
+    image: postgres:17
+    restart: unless-stopped
+    networks:
+      - sea_battle
   proxy:
     ports:
       - "28080:28080"

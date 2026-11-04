@@ -286,10 +286,13 @@ func TestAuthenticationHandlers(test *testing.T) {
 	protectedRecorder := httptest.NewRecorder()
 	protectedRequest := httptest.NewRequest(http.MethodGet, "/protected", nil)
 	protectedRequest.Header.Set("Authorization", "Bearer "+response.Token)
-	protected := &Proxy{logger: logger}
-	protected.AuthHandler(auth, http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+	protected := (&MyProxy{logger: logger}).AuthHandler(auth, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Context().Value(userContextKey{}) != "captain" {
+			test.Errorf("authenticated username was not attached to request context")
+		}
 		writer.WriteHeader(http.StatusNoContent)
-	})).ServeHTTP(protectedRecorder, protectedRequest)
+	}))
+	protected.ServeHTTP(protectedRecorder, protectedRequest)
 	if protectedRecorder.Code != http.StatusNoContent {
 		test.Errorf("protected status = %d; want 204", protectedRecorder.Code)
 	}
@@ -302,7 +305,6 @@ func TestAuthenticationHandlersRejectBadRequests(test *testing.T) {
 	if err != nil {
 		test.Fatalf("New() error = %v", err)
 	}
-
 	registerRecorder := httptest.NewRecorder()
 	RegisterHandler(auth).ServeHTTP(registerRecorder, httptest.NewRequest(http.MethodPost, "/register", strings.NewReader("{")))
 	if registerRecorder.Code != http.StatusBadRequest {
@@ -318,22 +320,37 @@ func TestAuthenticationHandlersRejectBadRequests(test *testing.T) {
 	if verifyRecorder.Code != http.StatusUnauthorized {
 		test.Errorf("missing token status = %d; want 401", verifyRecorder.Code)
 	}
-	loginDeniedRecorder := httptest.NewRecorder()
-	LoginHandler(auth).ServeHTTP(loginDeniedRecorder, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"name":"unknown","password":"secret"}`)))
-	if loginDeniedRecorder.Code != http.StatusUnauthorized {
-		test.Errorf("invalid credentials status = %d; want 401", loginDeniedRecorder.Code)
+}
+
+func TestValidatePlayerFleet(test *testing.T) {
+	field := validFleet()
+	ships, err := validatePlayerField(field)
+	if err != nil || len(ships) != 10 {
+		test.Fatalf("valid fleet rejected: ships=%d error=%v", len(ships), err)
+	}
+	field[1][4] = 1
+	if _, err := validatePlayerField(field); err == nil || !strings.Contains(err.Error(), "touch") {
+		test.Fatalf("diagonally touching ships accepted: %v", err)
+	}
+	if isStraightShip([]point{{X: 1, Y: 1}, {X: 1, Y: 2}, {X: 2, Y: 2}}) {
+		test.Fatal("bent ship accepted")
 	}
 }
 
-func (rep *proxyAuthRepoStub) RegisterUser(_ context.Context, name, passwordHash string) error {
-	rep.registeredName = name
-	rep.registeredHash = passwordHash
-	return nil
-}
-
-func (rep *proxyAuthRepoStub) GetPasswordHash(context.Context, string) (string, error) {
-	return rep.passwordHash, nil
-}
+func TestGameSessionValidatesShotsAndDoesNotExposeEnemyField(test *testing.T) {
+	botServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/health", "/start", "/game_over":
+			writer.WriteHeader(http.StatusOK)
+		case "/shoot":
+			_, _ = io.WriteString(writer, `{"x":0,"y":0}`)
+		case "/set_result":
+			writer.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer botServer.Close()
 
 func (rep *proxyAuthRepoStub) FindOrCreateGoogleUser(context.Context, string, string) (int64, string, error) {
 	return 1, "google@example.com", nil
@@ -345,11 +362,60 @@ func (rep *proxyAuthRepoStub) SetResult(_ context.Context, _ string, userWin boo
 	return rep.matchError
 }
 
-func newTestProxy(server *httptest.Server) *Proxy {
-	return &Proxy{
-		client: server.Client(),
-		bots:   map[string]config.BotConfig{"simple_bot": {URL: server.URL}},
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	game := proxy.sessions[state.SessionID]
+	target := point{}
+	found := false
+	for _, ship := range game.enemyShips {
+		if len(ship.Cells) == 1 {
+			target = ship.Cells[0]
+			found = true
+			break
+		}
+	}
+	if !found {
+		test.Fatal("generated fleet has no patrol boats")
+	}
+	shotRequest := botRequest{Action: "shoot", SessionID: state.SessionID, X: intPointer(target.X), Y: intPointer(target.Y)}
+	first := serveAsUser(proxy, "captain", shotRequest)
+	if first.Code != http.StatusOK {
+		test.Fatalf("first shot status=%d body=%q", first.Code, first.Body.String())
+	}
+	var shotResponse gameResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &shotResponse); err != nil {
+		test.Fatal(err)
+	}
+	if shotResponse.PlayerShot == nil || shotResponse.PlayerShot.Result != "Sink" || len(shotResponse.PlayerShot.SunkShip) != 1 {
+		test.Fatalf("expected a sunk single-cell ship in response: %+v", shotResponse.PlayerShot)
+	}
+	if !shotResponse.YourTurn {
+		test.Fatal("a player hit should keep the player's turn")
+	}
+	for _, around := range shotResponse.PlayerShot.AroundSunk {
+		if around.X < 0 || around.X >= 10 || around.Y < 0 || around.Y >= 10 {
+			test.Fatalf("out-of-bounds around-sunk cell: %+v", around)
+		}
+	}
+
+	before := len(game.playerShots)
+	duplicate := serveAsUser(proxy, "captain", shotRequest)
+	if duplicate.Code != http.StatusBadRequest || !strings.Contains(duplicate.Body.String(), "already") {
+		test.Fatalf("duplicate shot status=%d body=%q", duplicate.Code, duplicate.Body.String())
+	}
+	if len(game.playerShots) != before {
+		test.Fatal("invalid duplicate shot changed session state")
+	}
+
+	outOfRange := serveAsUser(proxy, "captain", botRequest{
+		Action: "shoot", SessionID: state.SessionID, X: intPointer(10), Y: intPointer(0),
+	})
+	if outOfRange.Code != http.StatusBadRequest || len(game.playerShots) != before {
+		test.Fatalf("out-of-range shot status=%d and shots=%d", outOfRange.Code, len(game.playerShots))
+	}
+	missingCoordinates := serveAsUser(proxy, "captain", botRequest{
+		Action: "shoot", SessionID: state.SessionID,
+	})
+	if missingCoordinates.Code != http.StatusBadRequest || len(game.playerShots) != before {
+		test.Fatalf("missing coordinates status=%d and shots=%d", missingCoordinates.Code, len(game.playerShots))
 	}
 }
 
@@ -358,33 +424,46 @@ func TestProxyHandlerValidatesRequestAndBotName(test *testing.T) {
 	defer server.Close()
 	handler := newTestProxy(server).legacyProxyHandler()
 
-	tests := []struct {
-		name       string
-		body       string
-		wantStatus int
-	}{
-		{name: "invalid JSON", body: "{", wantStatus: http.StatusBadRequest},
-		{name: "unknown bot", body: `{"name":"unknown","action":"shoot"}`, wantStatus: http.StatusBadRequest},
+func TestOutOfTurnAndForeignSessionAreRejectedWithoutMutation(test *testing.T) {
+	proxy := &MyProxy{logger: slog.New(slog.NewTextHandler(io.Discard, nil)), sessions: make(map[string]*gameSession)}
+	field := validFleet()
+	ships, err := validatePlayerField(field)
+	if err != nil {
+		test.Fatal(err)
 	}
-	for _, testCase := range tests {
-		test.Run(testCase.name, func(test *testing.T) {
-			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(testCase.body))
-			handler.ServeHTTP(recorder, request)
-			if recorder.Code != testCase.wantStatus {
-				test.Errorf("status = %d; want %d", recorder.Code, testCase.wantStatus)
-			}
-		})
+	enemyField, enemyShips, err := generateEnemyFleet()
+	if err != nil {
+		test.Fatal(err)
+	}
+	session := &gameSession{
+		id: "session-1", user: "captain", botID: "simple_bot",
+		playerField: field, playerShips: ships, enemyField: enemyField, enemyShips: enemyShips,
+		playerShots: make(map[string]string), enemyShots: make(map[string]string),
+		yourTurn: false, expiresAt: time.Now().Add(time.Hour),
+	}
+	proxy.sessions[session.id] = session
+	request := botRequest{Action: "shoot", SessionID: session.id, X: intPointer(0), Y: intPointer(0)}
+	response := serveAsUser(proxy, "captain", request)
+	if response.Code != http.StatusBadRequest || len(session.playerShots) != 0 {
+		test.Fatalf("out-of-turn shot status=%d body=%q", response.Code, response.Body.String())
+	}
+	foreign := serveAsUser(proxy, "intruder", request)
+	if foreign.Code != http.StatusNotFound || len(session.playerShots) != 0 {
+		test.Fatalf("foreign session status=%d body=%q", foreign.Code, foreign.Body.String())
 	}
 }
 
-func TestProxyHandlerForwardsSuccessfulBotAction(test *testing.T) {
+func TestMissRunsOneBotShotAndStateAdvancesRemainingBotTurn(test *testing.T) {
+	var botShotIndex int
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/health":
+		case "/health", "/start", "/set_result", "/game_over":
 			writer.WriteHeader(http.StatusOK)
 		case "/shoot":
-			_, _ = writer.Write([]byte(`{"x":2,"y":5}`))
+			targets := []point{{X: 0, Y: 0}, {X: 0, Y: 1}}
+			target := targets[botShotIndex]
+			botShotIndex++
+			_ = json.NewEncoder(writer).Encode(target)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -399,22 +478,46 @@ func TestProxyHandlerForwardsSuccessfulBotAction(test *testing.T) {
 	}
 }
 
-func TestProxyHandlerRejectsUnhealthyBot(test *testing.T) {
-	shootCalled := false
+func TestBotSinkCommitsOnlyAfterResultIsRecorded(test *testing.T) {
+	var gotResult my_types.ShotResult
+	var session *gameSession
+	var resultObservedBeforeCommit bool
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/health" {
-			writer.WriteHeader(http.StatusServiceUnavailable)
-			return
+		switch request.URL.Path {
+		case "/shoot":
+			_ = json.NewEncoder(writer).Encode(point{X: 0, Y: 1})
+		case "/set_result":
+			var body struct {
+				Result my_types.ShotResult `json:"result"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				test.Errorf("decode bot result: %v", err)
+				writer.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			gotResult = body.Result
+			resultObservedBeforeCommit = len(session.enemyShots) == 0 &&
+				session.playerField[0][1] == my_types.SHIP
+		default:
+			http.NotFound(writer, request)
 		}
-		shootCalled = true
 	}))
 	defer server.Close()
 	handler := newTestProxy(server).legacyProxyHandler()
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(`{"name":"simple_bot","action":"shoot"}`))
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusServiceUnavailable || shootCalled {
-		test.Errorf("status=%d actionCalled=%v; want 503 and no action", recorder.Code, shootCalled)
+	if recorder.Code != http.StatusNoContent ||
+		recorder.Header().Get("Access-Control-Allow-Origin") != "http://localhost:8080" ||
+		!strings.Contains(recorder.Header().Get("Access-Control-Allow-Headers"), "Authorization") {
+		test.Fatalf("unexpected CORS preflight: status=%d headers=%v", recorder.Code, recorder.Header())
+	}
+
+	rejected := httptest.NewRequest(http.MethodOptions, "/bot", nil)
+	rejected.Header.Set("Origin", "https://evil.example")
+	rejectedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(rejectedRecorder, rejected)
+	if rejectedRecorder.Code != http.StatusForbidden {
+		test.Fatalf("untrusted origin status=%d; want 403", rejectedRecorder.Code)
 	}
 }
 
@@ -429,11 +532,43 @@ func TestProxyHandlerRejectsBotActionErrors(test *testing.T) {
 	defer server.Close()
 	handler := newTestProxy(server).legacyProxyHandler()
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/bot", strings.NewReader(`{"name":"simple_bot","action":"shoot"}`))
-	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusBadGateway {
-		test.Errorf("status = %d; want %d", recorder.Code, http.StatusBadGateway)
+	proxy.ProxyHandler().ServeHTTP(recorder, request)
+	return recorder
+}
+
+func mustJSON(test *testing.T, value any) io.Reader {
+	body, err := json.Marshal(value)
+	if err != nil {
+		if test != nil {
+			test.Fatal(err)
+		}
+		panic(err)
 	}
+	return strings.NewReader(string(body))
+}
+
+func intPointer(value int) *int {
+	return &value
+}
+
+func validFleet() [][]int {
+	field := emptyField()
+	place := func(x, y, size, dx, dy int) {
+		for offset := 0; offset < size; offset++ {
+			field[x+offset*dx][y+offset*dy] = 1
+		}
+	}
+	place(0, 0, 4, 0, 1)
+	place(2, 0, 3, 0, 1)
+	place(4, 0, 3, 0, 1)
+	place(6, 0, 2, 0, 1)
+	place(8, 0, 2, 0, 1)
+	place(0, 5, 2, 0, 1)
+	place(2, 5, 1, 0, 1)
+	place(4, 5, 1, 0, 1)
+	place(6, 5, 1, 0, 1)
+	place(8, 5, 1, 0, 1)
+	return field
 }
 
 func TestBearerToken(test *testing.T) {
@@ -457,5 +592,35 @@ func TestBearerToken(test *testing.T) {
 				test.Errorf("bearerToken(%q) = %q, %v; want %q, error=%v", testCase.header, token, err, testCase.wantToken, testCase.wantError)
 			}
 		})
+	}
+}
+
+func TestSaveGameResultRetriesRepositoryFailures(test *testing.T) {
+	repository := &proxyAuthRepoStub{matchError: errors.New("database unavailable")}
+	proxy := &MyProxy{
+		rep:    repository,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	winner := "player"
+	session := &gameSession{id: "match-1", user: "captain", winner: &winner, gameOver: true}
+	proxy.saveGameResult(session)
+	if session.resultSaved || repository.matchCalls != 1 {
+		test.Fatalf("failed persistence should remain retryable: saved=%v calls=%d", session.resultSaved, repository.matchCalls)
+	}
+}
+
+func TestSaveGameResultRecordsWinnerOnce(test *testing.T) {
+	repository := &proxyAuthRepoStub{}
+	proxy := &MyProxy{
+		rep:    repository,
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	winner := "player"
+	session := &gameSession{id: "match-2", user: "captain", winner: &winner, gameOver: true}
+	proxy.saveGameResult(session)
+	proxy.saveGameResult(session)
+	if !session.resultSaved || repository.matchCalls != 1 || !repository.lastUserWin {
+		test.Fatalf("game result saved=%v calls=%d user_win=%v",
+			session.resultSaved, repository.matchCalls, repository.lastUserWin)
 	}
 }

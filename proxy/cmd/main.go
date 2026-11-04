@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,9 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
-	"sea_battle/my_types"
 	"sea_battle/proxy/config"
 	"sea_battle/proxy/internal/oauth"
 	"sea_battle/proxy/repository"
@@ -20,7 +17,10 @@ import (
 	"github.com/joho/godotenv"
 	mw "sea_battle/proxy/middleware"
 	"strings"
+	"sync"
 	"time"
+
+	mw "sea_battle/proxy/middleware"
 )
 
 type AuthRequest struct {
@@ -55,13 +55,10 @@ type proxyRepository interface {
 	FindOrCreateGoogleUser(context.Context, string, string) (int64, string, error)
 }
 
-func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *Proxy {
+func NewProxy(client *http.Client, cfg *config.Config, logger *slog.Logger) *MyProxy {
 	rep, err := repository.NewRepository(logger)
 	if err != nil {
-		logger.Error(
-			"proxy failed to initialize repository",
-			"error", err,
-		)
+		logger.Error("proxy failed to initialize repository", "error", err)
 		panic("failed to connect to database")
 	}
 	logger.Info("proxy initialized successfully")
@@ -400,9 +397,7 @@ func (p *Proxy) legacyProxyHandler() http.HandlerFunc {
 func LoginHandler(auth mw.AAA) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req AuthRequest
-
-		err := json.NewDecoder(r.Body).Decode(&req)
-		if err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -413,58 +408,47 @@ func LoginHandler(auth mw.AAA) http.HandlerFunc {
 			return
 		}
 
-		json.NewEncoder(w).Encode(AuthResponse{
-			Token: token,
-		})
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(AuthResponse{Token: token}); err != nil {
+			http.Error(w, "failed to encode login response", http.StatusInternalServerError)
+		}
 	}
 }
 
 func RegisterHandler(auth mw.AAA) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req AuthRequest
-		// body, _ := io.ReadAll(r.Body)
-		// fmt.Printf("%s", string(body))
-		// err := json.Unmarshal(body, &req)
-		// // err := json.NewDecoder(body).Decode(&req)
-
-		// if err != nil {
-
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		err := auth.Register(req.Name, req.Password)
-		if err != nil {
+		if err := auth.Register(req.Name, req.Password); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
 		w.WriteHeader(http.StatusCreated)
 	}
 }
 
 func VerifyHandler(auth mw.AAA) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		tokenString, err := bearerToken(authHeader)
+		tokenString, err := bearerToken(r.Header.Get("Authorization"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
-
 		name, err := auth.Verify(tokenString)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"user": name})
+		if err := json.NewEncoder(w).Encode(map[string]string{"user": name}); err != nil {
+			http.Error(w, "failed to encode verify response", http.StatusInternalServerError)
+		}
 	}
 }
 
-// bearerToken extracts the token from an "Authorization: Bearer <token>" header.
 func bearerToken(authHeader string) (string, error) {
 	parts := strings.Fields(authHeader)
 	if len(parts) == 0 {
@@ -476,8 +460,10 @@ func bearerToken(authHeader string) (string, error) {
 	return parts[1], nil
 }
 
-func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+type userContextKey struct{}
+
+func (p *MyProxy) AuthHandler(auth mw.AAA, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenString, err := bearerToken(r.Header.Get("Authorization"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
@@ -506,18 +492,43 @@ func (p *Proxy) AuthHandler(auth mw.AAA, next http.Handler) http.HandlerFunc {
 			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
 			return
 		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey{}, username)))
+	})
+}
 
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey{}, user)))
 	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if _, allowed := allowedOrigins[origin]; allowed {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		}
+		if r.Method == http.MethodOptions {
+			if origin == "" {
+				http.Error(w, "Origin header required", http.StatusForbidden)
+				return
+			}
+			if _, allowed := allowedOrigins[origin]; !allowed {
+				http.Error(w, "Origin not allowed", http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
-	var cfg_path string
-	flag.StringVar(&cfg_path, "config", "config.yaml", "config path")
+	var cfgPath string
+	flag.StringVar(&cfgPath, "config", "config.yaml", "config path")
 	flag.Parse()
 
-	client := &http.Client{}
-	cfg, err := config.LoadConfig(cfg_path)
+	client := &http.Client{Timeout: 30 * time.Second}
+	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		panic(err)
 	}
@@ -530,7 +541,6 @@ func main() {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	proxy := NewProxy(client, cfg, logger)
-	// http.HandleFunc("/bot", proxy.ProxyHandler())
 
 	authService, err := mw.New(time.Hour, logger, proxy.rep)
 	if err != nil {
